@@ -1,0 +1,22 @@
+# Logs
+logs/
+*.log
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+dist-ssr/
+
+# Env
+.env
+.env.local
+
+# Editor
+.vscode/
+*.local
+
+# OS
+.DS_Store
+Thumbs.db

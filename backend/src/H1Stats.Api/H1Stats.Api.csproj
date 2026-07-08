@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>H1Stats.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\H1Stats.Core\H1Stats.Core.csproj" />
+    <ProjectReference Include="..\H1Stats.Infrastructure\H1Stats.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

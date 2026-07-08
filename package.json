@@ -1,0 +1,15 @@
+{
+  "name": "h1stats",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hearts 1st operational intelligence platform",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && dotnet run --project src/H1Stats.Api",
+    "install:all": "cd frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
