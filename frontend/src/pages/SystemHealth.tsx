@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Activity, CheckCircle, XCircle } from 'lucide-react'
+import { AdminBackLink } from '../components/AdminBackLink'
 
 interface HealthStatus {
   status: string
@@ -20,6 +21,7 @@ export default function SystemHealth() {
 
   return (
     <div className="space-y-6">
+      <AdminBackLink />
       <div className="flex items-center gap-3">
         <Activity className="h-8 w-8 text-brand-primary" />
         <div>

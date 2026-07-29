@@ -27,9 +27,19 @@ public interface IPhysicianStatisticsRepository
     Task<PhysicianStatisticsReport> GetReportAsync(DateOnly dateFrom, DateOnly dateTo, string? physician, CancellationToken ct = default);
 }
 
+public interface ICm2Repository
+{
+    Task<bool> TestConnectionAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<CardiologistOption>> GetCardiologistsAsync(CancellationToken ct = default);
+    Task<PhysicianStatisticsReport> GetReportingDrReportAsync(
+        DateOnly dateFrom, DateOnly dateTo, string? cardiologist, CancellationToken ct = default);
+}
+
 public interface IDatabaseConnectionService
 {
     DatabaseSettings GetSettings();
     Task UpdateSettingsAsync(DatabaseSettings settings, CancellationToken ct = default);
     Task<ConnectionTestResult> TestConnectionAsync(DatabaseSettings? settings = null, CancellationToken ct = default);
+    Task<IReadOnlyList<DatabaseConnectionTestResult>> TestAllConnectionsAsync(
+        DatabaseSettings? settings = null, CancellationToken ct = default);
 }

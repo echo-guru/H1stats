@@ -3,6 +3,7 @@ using H1Stats.Core.Interfaces;
 using H1Stats.Core.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
+using Oracle.ManagedDataAccess.Client;
 
 namespace H1Stats.Infrastructure.Data;
 
@@ -23,8 +24,12 @@ public class DatabaseConnectionService : IDatabaseConnectionService
             return new DatabaseSettings
             {
                 Server = _settings.Server,
+                Cm2Server = _settings.Cm2Server,
+                Cm2Port = _settings.Cm2Port,
                 MvfDatabase = _settings.MvfDatabase,
                 AcusonDatabase = _settings.AcusonDatabase,
+                Cm2Sid = _settings.Cm2Sid,
+                Cm2Schema = _settings.Cm2Schema,
                 Username = _settings.Username,
                 Password = string.Empty
             };
@@ -35,25 +40,92 @@ public class DatabaseConnectionService : IDatabaseConnectionService
     {
         lock (_lock)
         {
-            _settings = settings;
+            _settings = MergeSettings(settings);
         }
         return Task.CompletedTask;
     }
 
     public async Task<ConnectionTestResult> TestConnectionAsync(DatabaseSettings? settings = null, CancellationToken ct = default)
     {
-        var cfg = settings ?? _settings;
+        var results = await TestAllConnectionsAsync(settings, ct);
+        var allConnected = results.All(r => r.Connected);
+        var message = string.Join("; ", results.Select(r => $"{r.Database}: {r.Message}"));
+        return new ConnectionTestResult(allConnected, message, DateTime.UtcNow);
+    }
+
+    public async Task<IReadOnlyList<DatabaseConnectionTestResult>> TestAllConnectionsAsync(
+        DatabaseSettings? settings = null, CancellationToken ct = default)
+    {
+        DatabaseSettings cfg;
+        lock (_lock)
+        {
+            cfg = settings is null ? _settings : MergeSettings(settings);
+        }
+
+        var sqlTests = new[]
+        {
+            TestSqlAsync($"{cfg.MvfDatabase} @ {cfg.Server}", cfg.MvfConnectionString, ct),
+            TestSqlAsync($"{cfg.AcusonDatabase} @ {cfg.Server}", cfg.AcusonConnectionString, ct),
+        };
+        var oracleTest = TestOracleAsync(
+            $"{cfg.Cm2Sid} @ {cfg.EffectiveCm2Server}:{cfg.Cm2Port}",
+            cfg.Cm2OracleConnectionString,
+            ct);
+
+        var results = await Task.WhenAll(sqlTests.Append(oracleTest));
+        return results;
+    }
+
+    private DatabaseSettings MergeSettings(DatabaseSettings incoming) =>
+        new()
+        {
+            Server = incoming.Server,
+            Cm2Server = incoming.Cm2Server,
+            Cm2Port = incoming.Cm2Port,
+            MvfDatabase = incoming.MvfDatabase,
+            AcusonDatabase = incoming.AcusonDatabase,
+            Cm2Sid = incoming.Cm2Sid,
+            Cm2Schema = incoming.Cm2Schema,
+            Username = incoming.Username,
+            Password = string.IsNullOrWhiteSpace(incoming.Password) ? _settings.Password : incoming.Password,
+        };
+
+    private static async Task<DatabaseConnectionTestResult> TestSqlAsync(
+        string name, string connectionString, CancellationToken ct)
+    {
         try
         {
-            await using var conn = new SqlConnection(cfg.MvfConnectionString);
+            var testConnectionString = connectionString.Contains("Connect Timeout", StringComparison.OrdinalIgnoreCase)
+                ? connectionString
+                : $"{connectionString};Connect Timeout=5";
+
+            await using var conn = new SqlConnection(testConnectionString);
             await conn.OpenAsync(ct);
             await using var cmd = new SqlCommand("SELECT 1", conn);
             await cmd.ExecuteScalarAsync(ct);
-            return new ConnectionTestResult(true, $"Connected to {cfg.Server}/{cfg.MvfDatabase}", DateTime.UtcNow);
+            return new DatabaseConnectionTestResult(name, true, "Connected", DateTime.UtcNow);
         }
         catch (Exception ex)
         {
-            return new ConnectionTestResult(false, ex.Message, DateTime.UtcNow);
+            return new DatabaseConnectionTestResult(name, false, ex.Message, DateTime.UtcNow);
+        }
+    }
+
+    private static async Task<DatabaseConnectionTestResult> TestOracleAsync(
+        string name, string connectionString, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = new OracleConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT 1 FROM DUAL";
+            await cmd.ExecuteScalarAsync(ct);
+            return new DatabaseConnectionTestResult(name, true, "Connected", DateTime.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            return new DatabaseConnectionTestResult(name, false, ex.Message, DateTime.UtcNow);
         }
     }
 }

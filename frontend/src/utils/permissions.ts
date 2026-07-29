@@ -50,8 +50,8 @@ export function canAccessPath(path: string, perms: UserPermissions): boolean {
 
 export function defaultPathForUser(perms: UserPermissions): string {
   if (perms.modules.includes('dashboard') || perms.isAdmin) return '/dashboard'
-  if (perms.modules.includes('clinical')) return '/clinical/physician-statistics'
-  if (perms.modules.includes('administration')) return '/admin/users'
+  if (perms.modules.includes('clinical')) return '/clinical'
+  if (perms.modules.includes('administration')) return '/admin'
   return '/dashboard'
 }
 

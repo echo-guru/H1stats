@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, Save, Users } from 'lucide-react'
 import { Button } from '../components/ui/button'
+import { AdminBackLink } from '../components/AdminBackLink'
 
 interface UserRow {
   username: string
@@ -117,6 +118,7 @@ export default function AdminUsers() {
 
   return (
     <div className="space-y-6">
+      <AdminBackLink />
       <div className="flex items-center gap-3">
         <Users className="h-8 w-8 text-brand-primary" />
         <div>

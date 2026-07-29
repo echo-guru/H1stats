@@ -21,6 +21,7 @@ builder.Services.AddSingleton<IAuthService, AuthService>();
 builder.Services.AddSingleton<IUserAdminService>(sp => (AuthService)sp.GetRequiredService<IAuthService>());
 builder.Services.AddSingleton<IDatabaseConnectionService, DatabaseConnectionService>();
 builder.Services.AddScoped<IPhysicianStatisticsRepository, PhysicianStatisticsRepository>();
+builder.Services.AddScoped<ICm2Repository, Cm2Repository>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 
 builder.Services.AddControllers();

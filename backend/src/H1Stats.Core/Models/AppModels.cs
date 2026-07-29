@@ -31,6 +31,8 @@ public record CreateUserRequest(string Username, string Password, bool IsAdmin);
 
 public record UpdateUserRequest(string? Password, bool? IsAdmin);
 
+public record CardiologistOption(string Id, string DisplayName);
+
 public record DashboardSummary(
     int StudiesToday,
     int StudiesThisWeek,
@@ -68,6 +70,12 @@ public record PhysicianStatisticsReport(
 );
 
 public record ConnectionTestResult(bool Connected, string Message, DateTime? TestedAt = null);
+
+public record DatabaseConnectionTestResult(
+    string Database,
+    bool Connected,
+    string Message,
+    DateTime? TestedAt = null);
 
 public record HealthResponse(
     string Status,

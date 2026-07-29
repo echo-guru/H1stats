@@ -56,7 +56,11 @@ public class AdminController : ControllerBase
     [HttpPost("database/test")]
     public async Task<IActionResult> TestDatabase([FromBody] DatabaseSettings? settings, CancellationToken ct)
     {
-        var result = await _db.TestConnectionAsync(settings, ct);
-        return Ok(result);
+        var results = await _db.TestAllConnectionsAsync(settings, ct);
+        return Ok(new
+        {
+            connected = results.All(r => r.Connected),
+            results
+        });
     }
 }

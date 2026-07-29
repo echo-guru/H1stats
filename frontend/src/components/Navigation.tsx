@@ -28,18 +28,23 @@ const NAV_ITEMS: NavItem[] = [
     module: 'dashboard',
   },
   {
-    path: '/clinical/physician-statistics',
+    path: '/clinical',
     label: 'Clinical',
     icon: Stethoscope,
     module: 'clinical',
-    children: [{ path: '/clinical/physician-statistics', label: 'Physician Statistics' }],
+    children: [
+      { path: '/clinical', label: 'Overview' },
+      { path: '/clinical/physician-statistics', label: 'Reporting Dr - Syngo' },
+      { path: '/clinical/reporting-dr-cm2', label: 'Reporting Dr - CM2' },
+    ],
   },
   {
-    path: '/admin/users',
+    path: '/admin',
     label: 'Administration',
     icon: Settings,
     module: 'administration',
     children: [
+      { path: '/admin', label: 'Overview' },
       { path: '/admin/users', label: 'Users' },
       { path: '/admin/database', label: 'Database' },
       { path: '/admin/health', label: 'System Health' },
