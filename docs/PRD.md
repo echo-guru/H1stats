@@ -50,15 +50,20 @@ H1Stats is the operational intelligence platform used by Hearts 1st staff every 
 | Server | H1PACS (192.168.12.205) |
 | Login | h1stats (dedicated SQL login) |
 | Databases | mvf, AcusonDB |
+| Oracle CM2 | Hearts1st (`HEARTS1ST` schema) — read-only |
 
 Configured via Administration → Database Configuration. All access is read-only.
+
+Oracle/CM2 semantic model: [CM2_SEMANTIC_MODEL.md](./CM2_SEMANTIC_MODEL.md).
 
 ## Information Architecture (v1)
 
 ```
 Dashboard
 Clinical
-  └── Physician Statistics
+  ├── Reporting Dr - Syngo (Physician Statistics)
+  ├── Reporting Dr - CM2
+  └── Top Referring Doctors - CM2
 Administration
   ├── Users
   ├── Roles
@@ -68,7 +73,7 @@ Administration
 
 Future modules (Operations, Quality, Research, Finance) must plug in without navigation framework changes.
 
-## Clinical Module — Physician Statistics
+## Clinical Module — Physician Statistics (Syngo)
 
 ### Filters
 
@@ -99,6 +104,54 @@ Grouped by Physician → Study Type. Columns: Study Type, Total, Outpatient, Inp
 ### Export
 
 Excel, CSV. PDF planned.
+
+## Clinical Module — Reporting Dr (CM2)
+
+### Filters
+
+- Date From / Date To
+- Reporting Cardiologist (default: All; from `TEST.CARDIOLOGIST1` via curated lookup)
+
+### Database Mapping
+
+| Field | Source |
+|-------|--------|
+| Study Date | `HEARTS1ST.TEST.TEST_DATE` |
+| Investigation Type | `TEST.TEST_REQUIRED` → semantic lookup (codes 1–12) |
+| Reporting Cardiologist | `TEST.CARDIOLOGIST1` → curated name map |
+| Ward | `TEST.WARD` numeric code — `1` = Outpatient; `2`–`41` = Inpatient; else Unknown (in Total only). See [CM2_SEMANTIC_MODEL.md](./CM2_SEMANTIC_MODEL.md). |
+
+### Report Output
+
+Grouped by Reporting Cardiologist → Investigation Type. Columns: Investigation Type, Total, Outpatient, Inpatient.
+
+## Clinical Module — Top Referring Doctors (CM2)
+
+### Filters
+
+- Date From / Date To
+- Top N (editable; default **50**; server clamp 1–500)
+
+### Database Mapping
+
+| Field | Source |
+|-------|--------|
+| Study Date | `HEARTS1ST.TEST.TEST_DATE` |
+| Investigation Type | `TEST.TEST_REQUIRED` → semantic lookup |
+| Referring Doctor (person) | `TEST.REFERRING_DOCTOR` → `DOCTOR.DOCTOR_RID` → `CM2_DOCTOR` (fallback: unresolved legacy `DOCTOR_RID`) |
+| Ward | `TEST.WARD` — `1` = Outpatient; `2`–`41` = Inpatient; else Unknown |
+
+### Reporting Grain
+
+**Doctor person** — consolidate locations under `CM2_DOCTOR_RID` when linked; otherwise one unresolved person per legacy `DOCTOR_RID`.
+
+### Report Output
+
+Ranked by total studies (DESC), top N. Grouped by Referring Doctor → Investigation Type. Columns: Investigation Type, Total, Outpatient, Inpatient. Doctor subtotals and grand totals.
+
+### Export
+
+CSV.
 
 ## Out of Scope (v1)
 

@@ -33,6 +33,8 @@ public interface ICm2Repository
     Task<IReadOnlyList<CardiologistOption>> GetCardiologistsAsync(CancellationToken ct = default);
     Task<PhysicianStatisticsReport> GetReportingDrReportAsync(
         DateOnly dateFrom, DateOnly dateTo, string? cardiologist, CancellationToken ct = default);
+    Task<TopReferringDoctorsReport> GetTopReferringDoctorsAsync(
+        DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default);
 }
 
 public interface IDatabaseConnectionService

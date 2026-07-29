@@ -69,6 +69,29 @@ public record PhysicianStatisticsReport(
     CountTriple GrandTotal
 );
 
+public record ReferringDoctorStatRow(
+    string PersonId,
+    string DisplayName,
+    string InvestigationType,
+    int Total,
+    int Outpatient,
+    int Inpatient
+);
+
+public record ReferringDoctorGroup(
+    int Rank,
+    string PersonId,
+    string DisplayName,
+    IReadOnlyList<ReferringDoctorStatRow> Rows,
+    CountTriple Subtotal
+);
+
+public record TopReferringDoctorsReport(
+    IReadOnlyList<ReferringDoctorGroup> Groups,
+    CountTriple GrandTotal,
+    int TopN
+);
+
 public record ConnectionTestResult(bool Connected, string Message, DateTime? TestedAt = null);
 
 public record DatabaseConnectionTestResult(

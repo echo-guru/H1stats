@@ -1,25 +1,28 @@
-import { useEffect, useState } from 'react'
-import { Download, Search, type LucideIcon } from 'lucide-react'
-import { Button } from './ui/button'
-import { formatPersonName } from '../lib/utils'
+import { useState } from 'react'
+import { Download, Search, Users } from 'lucide-react'
+import { Button } from '../components/ui/button'
 
-interface PhysicianStatRow {
-  physician: string
-  studyType: string
+interface ReferringDoctorStatRow {
+  personId: string
+  displayName: string
+  investigationType: string
   total: number
   outpatient: number
   inpatient: number
 }
 
-interface PhysicianGroup {
-  physician: string
-  rows: PhysicianStatRow[]
+interface ReferringDoctorGroup {
+  rank: number
+  personId: string
+  displayName: string
+  rows: ReferringDoctorStatRow[]
   subtotal: { total: number; outpatient: number; inpatient: number }
 }
 
 interface ReportResult {
-  groups: PhysicianGroup[]
+  groups: ReferringDoctorGroup[]
   grandTotal: { total: number; outpatient: number; inpatient: number }
+  topN: number
 }
 
 function toLocalDateInputValue(date = new Date()): string {
@@ -29,70 +32,17 @@ function toLocalDateInputValue(date = new Date()): string {
   return `${y}-${m}-${d}`
 }
 
-export interface ReportingDrReportProps {
-  title: string
-  subtitle: string
-  icon: LucideIcon
-  physiciansUrl: string
-  reportUrl: string
-  csvPrefix: string
-  /** When true, physicians API returns { id, displayName } objects (CM2). */
-  physicianOptions?: boolean
-  /** How to format physician names in the UI. Defaults to HL7/Syngo formatting. */
-  formatPhysicianName?: (name: string) => string
-  /** Column / CSV label for study/investigation type. Defaults to "Study Type". */
-  studyTypeLabel?: string
-  /** Filter dropdown label. Defaults to "Diagnosing Physician". */
-  physicianFilterLabel?: string
-}
-
-export default function ReportingDrReport({
-  title,
-  subtitle,
-  icon: Icon,
-  physiciansUrl,
-  reportUrl,
-  csvPrefix,
-  physicianOptions = false,
-  formatPhysicianName = formatPersonName,
-  studyTypeLabel = 'Study Type',
-  physicianFilterLabel = 'Diagnosing Physician',
-}: ReportingDrReportProps) {
+export default function TopReferringDoctorsCm2() {
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date()
     d.setDate(1)
     return toLocalDateInputValue(d)
   })
   const [dateTo, setDateTo] = useState(() => toLocalDateInputValue())
-  const [physician, setPhysician] = useState('')
-  const [physicians, setPhysicians] = useState<string[]>([])
-  const [physicianChoices, setPhysicianChoices] = useState<{ id: string; displayName: string }[]>([])
+  const [topN, setTopN] = useState(50)
   const [report, setReport] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    fetch(physiciansUrl)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((list) => {
-        if (physicianOptions && Array.isArray(list)) {
-          setPhysicianChoices(
-            list.map((item: { id: string; displayName: string }) => ({
-              id: String(item.id),
-              displayName: item.displayName,
-            }))
-          )
-          setPhysicians([])
-        } else {
-          setPhysicians(Array.isArray(list) ? list : [])
-          setPhysicianChoices([])
-        }
-      })
-      .catch(() => {
-        setPhysicians([])
-        setPhysicianChoices([])
-      })
-  }, [physiciansUrl, physicianOptions])
 
   const runReport = async () => {
     const from = dateFrom.trim()
@@ -102,12 +52,21 @@ export default function ReportingDrReport({
       return
     }
 
+    const n = Number(topN)
+    if (!Number.isFinite(n) || n < 1) {
+      setError('Top N must be a number of at least 1')
+      return
+    }
+
     setLoading(true)
     setError('')
     try {
-      const params = new URLSearchParams({ dateFrom: from, dateTo: to })
-      if (physician) params.set('physician', physician)
-      const res = await fetch(`${reportUrl}?${params}`)
+      const params = new URLSearchParams({
+        dateFrom: from,
+        dateTo: to,
+        top: String(Math.min(500, Math.max(1, Math.floor(n)))),
+      })
+      const res = await fetch(`/api/clinical/cm2/top-referring-doctors?${params}`)
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         throw new Error(err.message || 'Report failed')
@@ -123,19 +82,25 @@ export default function ReportingDrReport({
 
   const exportCsv = () => {
     if (!report) return
-    const lines = [`Physician,${studyTypeLabel},Total,Outpatient,Inpatient`]
+    const lines = ['Rank,Referring Doctor,Investigation Type,Total,Outpatient,Inpatient']
     for (const g of report.groups) {
       for (const r of g.rows) {
-        lines.push(`"${r.physician}","${r.studyType}",${r.total},${r.outpatient},${r.inpatient}`)
+        lines.push(
+          `${g.rank},"${g.displayName}","${r.investigationType}",${r.total},${r.outpatient},${r.inpatient}`
+        )
       }
-      lines.push(`"${g.physician}","Subtotal",${g.subtotal.total},${g.subtotal.outpatient},${g.subtotal.inpatient}`)
+      lines.push(
+        `${g.rank},"${g.displayName}","Subtotal",${g.subtotal.total},${g.subtotal.outpatient},${g.subtotal.inpatient}`
+      )
     }
-    lines.push(`"Grand Total","",${report.grandTotal.total},${report.grandTotal.outpatient},${report.grandTotal.inpatient}`)
+    lines.push(
+      `,"Grand Total","",${report.grandTotal.total},${report.grandTotal.outpatient},${report.grandTotal.inpatient}`
+    )
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${csvPrefix}-${dateFrom}-${dateTo}.csv`
+    a.download = `top-referring-doctors-cm2-${dateFrom}-${dateTo}-top${report.topN}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -143,10 +108,12 @@ export default function ReportingDrReport({
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Icon className="h-8 w-8 text-brand-primary" />
+        <Users className="h-8 w-8 text-brand-primary" />
         <div>
-          <h2 className="text-2xl font-semibold text-brand-accent">{title}</h2>
-          <p className="text-sm text-gray-600">{subtitle}</p>
+          <h2 className="text-2xl font-semibold text-brand-accent">Top Referring Doctors - CM2</h2>
+          <p className="text-sm text-gray-600">
+            Referral activity by doctor person and investigation type (Oracle CM2 / Hearts1st)
+          </p>
         </div>
       </div>
 
@@ -171,21 +138,15 @@ export default function ReportingDrReport({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-brand-primary mb-1">{physicianFilterLabel}</label>
-            <select
-              value={physician}
-              onChange={(e) => setPhysician(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary bg-white"
-            >
-              <option value="">All Doctors</option>
-              {physicianOptions
-                ? physicianChoices.map((p) => (
-                    <option key={p.id} value={p.id}>{formatPhysicianName(p.displayName)}</option>
-                  ))
-                : physicians.map((p) => (
-                    <option key={p} value={p}>{formatPhysicianName(p)}</option>
-                  ))}
-            </select>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Top N</label>
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={topN}
+              onChange={(e) => setTopN(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
           </div>
           <div className="flex items-end gap-2">
             <Button variant="brand" onClick={runReport} disabled={loading} className="gap-2 flex-1">
@@ -205,16 +166,23 @@ export default function ReportingDrReport({
 
       {report && (
         <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Showing top {report.topN} referring doctors by total studies
+            ({report.groups.length} returned).
+          </p>
           {report.groups.map((g) => (
-            <div key={g.physician} className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
-              <div className="bg-brand-primary text-white px-4 py-2.5 font-semibold">
-                {formatPhysicianName(g.physician)}
+            <div key={g.personId} className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
+              <div className="bg-brand-primary text-white px-4 py-2.5 font-semibold flex items-center gap-3">
+                <span className="inline-flex items-center justify-center min-w-8 h-8 rounded bg-white/15 text-sm font-mono">
+                  #{g.rank}
+                </span>
+                <span>{g.displayName}</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
-                      <th className="text-left p-3 font-medium text-brand-primary">{studyTypeLabel}</th>
+                      <th className="text-left p-3 font-medium text-brand-primary">Investigation Type</th>
                       <th className="text-right p-3 font-medium text-brand-primary">Total</th>
                       <th className="text-right p-3 font-medium text-brand-primary">Outpatient</th>
                       <th className="text-right p-3 font-medium text-brand-primary">Inpatient</th>
@@ -222,8 +190,11 @@ export default function ReportingDrReport({
                   </thead>
                   <tbody>
                     {g.rows.map((r) => (
-                      <tr key={`${g.physician}-${r.studyType}`} className="border-b border-brand-primary-border/50 hover:bg-muted/30">
-                        <td className="p-3">{r.studyType}</td>
+                      <tr
+                        key={`${g.personId}-${r.investigationType}`}
+                        className="border-b border-brand-primary-border/50 hover:bg-muted/30"
+                      >
+                        <td className="p-3">{r.investigationType}</td>
                         <td className="p-3 text-right font-mono">{r.total}</td>
                         <td className="p-3 text-right font-mono">{r.outpatient}</td>
                         <td className="p-3 text-right font-mono">{r.inpatient}</td>
@@ -245,7 +216,7 @@ export default function ReportingDrReport({
             <table className="w-full text-sm">
               <tbody>
                 <tr className="bg-brand-accent/10 font-bold">
-                  <td className="p-3">Grand Total</td>
+                  <td className="p-3">Grand Total (top {report.topN})</td>
                   <td className="p-3 text-right font-mono w-24">{report.grandTotal.total}</td>
                   <td className="p-3 text-right font-mono w-28">{report.grandTotal.outpatient}</td>
                   <td className="p-3 text-right font-mono w-24">{report.grandTotal.inpatient}</td>

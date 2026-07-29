@@ -1,4 +1,5 @@
 using H1Stats.Core.Interfaces;
+using H1Stats.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace H1Stats.Api.Controllers;
@@ -69,6 +70,28 @@ public class ClinicalController : ControllerBase
         try
         {
             var report = await _cm2.GetReportingDrReportAsync(from, to, physician, ct);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/top-referring-doctors")]
+    public async Task<IActionResult> GetTopReferringDoctors(
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] int? top,
+        CancellationToken ct)
+    {
+        if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var topN = Cm2TopN.Clamp(top);
+            var report = await _cm2.GetTopReferringDoctorsAsync(from, to, topN, ct);
             return Ok(report);
         }
         catch (Exception ex)

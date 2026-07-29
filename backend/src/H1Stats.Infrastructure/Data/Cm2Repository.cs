@@ -8,7 +8,7 @@ using Oracle.ManagedDataAccess.Client;
 namespace H1Stats.Infrastructure.Data;
 
 /// <summary>
-/// Read-only access to CM2 Oracle (HEARTS1ST.TEST) for reporting-dr widgets and reports.
+/// Read-only access to CM2 Oracle (HEARTS1ST.TEST) for reporting-dr and referring-dr reports.
 /// </summary>
 public class Cm2Repository : ICm2Repository
 {
@@ -68,16 +68,16 @@ public class Cm2Repository : ICm2Repository
         var sql = $"""
             SELECT
                 TRIM(t.CARDIOLOGIST1) AS CardiologistId,
-                NULLIF(TRIM(t.TEST_REQUIRED), '') AS StudyType,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '') AS StudyType,
                 NULLIF(TRIM(t.WARD), '') AS Ward,
-                COUNT(*) AS StudyCount
+                COUNT(DISTINCT t.TEST_RID) AS StudyCount
             FROM {Schema}.TEST t
             WHERE t.TEST_DATE >= :DateFrom
               AND t.TEST_DATE < :DateToExclusive
               {physicianFilter}
             GROUP BY
                 TRIM(t.CARDIOLOGIST1),
-                NULLIF(TRIM(t.TEST_REQUIRED), ''),
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), ''),
                 NULLIF(TRIM(t.WARD), '')
             ORDER BY CardiologistId, StudyType, Ward
             """;
@@ -97,9 +97,10 @@ public class Cm2Repository : ICm2Repository
         while (await reader.ReadAsync(ct))
         {
             var rawId = reader.IsDBNull(0) ? null : reader.GetString(0);
+            var rawType = reader.IsDBNull(1) ? null : reader.GetString(1);
             rows.Add((
                 Cm2CardiologistMapping.ResolveDisplayName(rawId),
-                reader.IsDBNull(1) ? "Unknown" : reader.GetString(1),
+                Cm2InvestigationTypeMapping.ResolveDisplayName(rawType),
                 reader.IsDBNull(2) ? null : reader.GetString(2),
                 Convert.ToInt32(reader.GetValue(3))
             ));
@@ -117,9 +118,11 @@ public class Cm2Repository : ICm2Repository
                     {
                         var total = typeGroup.Sum(r => r.Count);
                         var outpatient = typeGroup
-                            .Where(r => WardClassification.IsOutpatient(r.Ward))
+                            .Where(r => WardClassification.IsCm2Outpatient(r.Ward))
                             .Sum(r => r.Count);
-                        var inpatient = total - outpatient;
+                        var inpatient = typeGroup
+                            .Where(r => WardClassification.IsCm2Inpatient(r.Ward))
+                            .Sum(r => r.Count);
                         return new PhysicianStatRow(
                             physGroup.Key, typeGroup.Key, total, outpatient, inpatient);
                     })
@@ -140,5 +143,158 @@ public class Cm2Repository : ICm2Repository
             grouped.Sum(g => g.Subtotal.Inpatient));
 
         return new PhysicianStatisticsReport(grouped, grand);
+    }
+
+    public async Task<TopReferringDoctorsReport> GetTopReferringDoctorsAsync(
+        DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default)
+    {
+        topN = Cm2TopN.Clamp(topN);
+
+        var sql = $"""
+            SELECT
+                CASE
+                    WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END AS PersonId,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
+                END AS DisplayName,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '') AS InvestigationTypeCode,
+                NULLIF(TRIM(t.WARD), '') AS Ward,
+                COUNT(DISTINCT t.TEST_RID) AS StudyCount
+            FROM {Schema}.TEST t
+            LEFT JOIN {Schema}.DOCTOR d
+              ON d.DOCTOR_RID = t.REFERRING_DOCTOR
+            LEFT JOIN {Schema}.CM2_DOCTOR cd
+              ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
+            WHERE t.TEST_DATE >= :DateFrom
+              AND t.TEST_DATE < :DateToExclusive
+            GROUP BY
+                CASE
+                    WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
+                END,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), ''),
+                NULLIF(TRIM(t.WARD), '')
+            """;
+
+        var rows = new List<(string PersonId, string DisplayName, string InvestigationType, string? Ward, int Count)>();
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var personId = reader.IsDBNull(0) ? "UNKNOWN" : reader.GetString(0);
+            var displayName = reader.IsDBNull(1) ? null : reader.GetString(1)?.Trim();
+            if (string.IsNullOrWhiteSpace(displayName))
+                displayName = personId == "UNKNOWN" ? "Unknown" : personId;
+
+            var rawType = reader.IsDBNull(2) ? null : reader.GetString(2);
+            rows.Add((
+                personId,
+                displayName,
+                Cm2InvestigationTypeMapping.ResolveDisplayName(rawType),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                Convert.ToInt32(reader.GetValue(4))
+            ));
+        }
+
+        var personGroups = rows
+            .GroupBy(r => r.PersonId, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var displayName = g
+                    .Select(r => r.DisplayName)
+                    .Where(n => !string.IsNullOrWhiteSpace(n) && !n.StartsWith("CM2:", StringComparison.OrdinalIgnoreCase) && !n.StartsWith("LEGACY:", StringComparison.OrdinalIgnoreCase))
+                    .DefaultIfEmpty(g.Key == "UNKNOWN" ? "Unknown" : g.First().DisplayName)
+                    .First();
+                var total = g.Sum(r => r.Count);
+                return new { PersonId = g.Key, DisplayName = displayName, Total = total, Rows = g.ToList() };
+            })
+            .OrderByDescending(g => g.Total)
+            .ThenBy(g => g.DisplayName)
+            .Take(topN)
+            .ToList();
+
+        var groups = personGroups
+            .Select((g, index) =>
+            {
+                var statRows = g.Rows
+                    .GroupBy(r => r.InvestigationType)
+                    .OrderBy(tg => tg.Key)
+                    .Select(tg =>
+                    {
+                        var total = tg.Sum(r => r.Count);
+                        var outpatient = tg.Where(r => WardClassification.IsCm2Outpatient(r.Ward)).Sum(r => r.Count);
+                        var inpatient = tg.Where(r => WardClassification.IsCm2Inpatient(r.Ward)).Sum(r => r.Count);
+                        return new ReferringDoctorStatRow(
+                            g.PersonId, g.DisplayName, tg.Key, total, outpatient, inpatient);
+                    })
+                    .ToList();
+
+                var sub = new CountTriple(
+                    statRows.Sum(r => r.Total),
+                    statRows.Sum(r => r.Outpatient),
+                    statRows.Sum(r => r.Inpatient));
+
+                return new ReferringDoctorGroup(index + 1, g.PersonId, g.DisplayName, statRows, sub);
+            })
+            .ToList();
+
+        var grand = new CountTriple(
+            groups.Sum(g => g.Subtotal.Total),
+            groups.Sum(g => g.Subtotal.Outpatient),
+            groups.Sum(g => g.Subtotal.Inpatient));
+
+        return new TopReferringDoctorsReport(groups, grand, topN);
     }
 }
