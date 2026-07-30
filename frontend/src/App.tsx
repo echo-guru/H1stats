@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard'
 import PhysicianStatistics from './pages/PhysicianStatistics'
 import ReportingDrCm2 from './pages/ReportingDrCm2'
 import TopReferringDoctorsCm2 from './pages/TopReferringDoctorsCm2'
+import TopReferringPracticesCm2 from './pages/TopReferringPracticesCm2'
 import ClinicalHome from './pages/ClinicalHome'
 import AdminHome from './pages/AdminHome'
 import AdminUsers from './pages/AdminUsers'
@@ -28,6 +29,7 @@ function App() {
               <Route path="/clinical/physician-statistics" element={<PhysicianStatistics />} />
               <Route path="/clinical/reporting-dr-cm2" element={<ReportingDrCm2 />} />
               <Route path="/clinical/top-referring-doctors-cm2" element={<TopReferringDoctorsCm2 />} />
+              <Route path="/clinical/top-referring-practices-cm2" element={<TopReferringPracticesCm2 />} />
               <Route path="/admin" element={<AdminHome />} />
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/database" element={<AdminDatabase />} />

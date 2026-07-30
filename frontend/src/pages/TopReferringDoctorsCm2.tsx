@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Download, Search, Users } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronDown, ChevronRight, Download, Search, Users } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
 interface ReferringDoctorStatRow {
@@ -23,6 +23,12 @@ interface ReportResult {
   groups: ReferringDoctorGroup[]
   grandTotal: { total: number; outpatient: number; inpatient: number }
   topN: number
+  investigationTypeFilter?: string | null
+}
+
+interface InvestigationTypeOption {
+  id: string
+  displayName: string
 }
 
 function toLocalDateInputValue(date = new Date()): string {
@@ -40,9 +46,30 @@ export default function TopReferringDoctorsCm2() {
   })
   const [dateTo, setDateTo] = useState(() => toLocalDateInputValue())
   const [topN, setTopN] = useState(50)
+  const [investigationType, setInvestigationType] = useState('')
+  const [investigationTypes, setInvestigationTypes] = useState<InvestigationTypeOption[]>([])
   const [report, setReport] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    fetch('/api/clinical/cm2/investigation-types')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => {
+        if (!Array.isArray(list)) {
+          setInvestigationTypes([])
+          return
+        }
+        setInvestigationTypes(
+          list.map((item: { id: string; displayName: string }) => ({
+            id: String(item.id),
+            displayName: item.displayName,
+          }))
+        )
+      })
+      .catch(() => setInvestigationTypes([]))
+  }, [])
 
   const runReport = async () => {
     const from = dateFrom.trim()
@@ -66,18 +93,25 @@ export default function TopReferringDoctorsCm2() {
         dateTo: to,
         top: String(Math.min(500, Math.max(1, Math.floor(n)))),
       })
+      if (investigationType) params.set('investigationType', investigationType)
       const res = await fetch(`/api/clinical/cm2/top-referring-doctors?${params}`)
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         throw new Error(err.message || 'Report failed')
       }
       setReport(await res.json())
+      setExpanded({})
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Report failed')
       setReport(null)
+      setExpanded({})
     } finally {
       setLoading(false)
     }
+  }
+
+  const toggleExpanded = (key: string) => {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
   const exportCsv = () => {
@@ -100,10 +134,18 @@ export default function TopReferringDoctorsCm2() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `top-referring-doctors-cm2-${dateFrom}-${dateTo}-top${report.topN}.csv`
+    const typeSlug = report.investigationTypeFilter
+      ? `-${report.investigationTypeFilter.replace(/\s+/g, '-').toLowerCase()}`
+      : ''
+    a.download = `top-referring-doctors-cm2-${dateFrom}-${dateTo}-top${report.topN}${typeSlug}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  const selectedTypeLabel =
+    report?.investigationTypeFilter ||
+    investigationTypes.find((t) => t.id === investigationType)?.displayName ||
+    'all tests'
 
   return (
     <div className="space-y-6">
@@ -118,7 +160,7 @@ export default function TopReferringDoctorsCm2() {
       </div>
 
       <div className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Date From</label>
             <input
@@ -136,6 +178,19 @@ export default function TopReferringDoctorsCm2() {
               onChange={(e) => setDateTo(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Investigation Type</label>
+            <select
+              value={investigationType}
+              onChange={(e) => setInvestigationType(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary bg-white"
+            >
+              <option value="">All tests</option>
+              {investigationTypes.map((t) => (
+                <option key={t.id} value={t.id}>{t.displayName}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Top N</label>
@@ -167,50 +222,64 @@ export default function TopReferringDoctorsCm2() {
       {report && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            Showing top {report.topN} referring doctors by total studies
-            ({report.groups.length} returned).
+            Showing top {report.topN} referring doctors for {selectedTypeLabel}
+            ({report.groups.length} returned). Click a doctor to expand investigation types.
           </p>
-          {report.groups.map((g) => (
-            <div key={g.personId} className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
-              <div className="bg-brand-primary text-white px-4 py-2.5 font-semibold flex items-center gap-3">
-                <span className="inline-flex items-center justify-center min-w-8 h-8 rounded bg-white/15 text-sm font-mono">
-                  #{g.rank}
-                </span>
-                <span>{g.displayName}</span>
+          {report.groups.map((g) => {
+            const isOpen = Boolean(expanded[g.personId])
+            const Chevron = isOpen ? ChevronDown : ChevronRight
+
+            return (
+              <div key={g.personId} className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(g.personId)}
+                  aria-expanded={isOpen}
+                  className="w-full bg-brand-primary text-white px-4 py-2.5 font-semibold flex items-center gap-3 text-left hover:bg-brand-primary/90 transition-colors"
+                >
+                  <Chevron className="h-4 w-4 shrink-0 opacity-90" />
+                  <span className="inline-flex items-center justify-center min-w-8 h-8 rounded bg-white/15 text-sm font-mono shrink-0">
+                    #{g.rank}
+                  </span>
+                  <span className="flex-1 min-w-0 truncate">{g.displayName}</span>
+                  <span
+                    className="shrink-0 rounded-md bg-white/20 px-3 py-1 text-base sm:text-lg font-mono font-bold tracking-wide tabular-nums"
+                    title="Total studies"
+                  >
+                    {g.subtotal.total.toLocaleString()}
+                  </span>
+                </button>
+
+                {isOpen && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-3 font-medium text-brand-primary">Investigation Type</th>
+                          <th className="text-right p-3 font-medium text-brand-primary">Total</th>
+                          <th className="text-right p-3 font-medium text-brand-primary">Outpatient</th>
+                          <th className="text-right p-3 font-medium text-brand-primary">Inpatient</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.rows.map((r) => (
+                          <tr
+                            key={`${g.personId}-${r.investigationType}`}
+                            className="border-b border-brand-primary-border/50 hover:bg-muted/30"
+                          >
+                            <td className="p-3">{r.investigationType}</td>
+                            <td className="p-3 text-right font-mono">{r.total}</td>
+                            <td className="p-3 text-right font-mono">{r.outpatient}</td>
+                            <td className="p-3 text-right font-mono">{r.inpatient}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left p-3 font-medium text-brand-primary">Investigation Type</th>
-                      <th className="text-right p-3 font-medium text-brand-primary">Total</th>
-                      <th className="text-right p-3 font-medium text-brand-primary">Outpatient</th>
-                      <th className="text-right p-3 font-medium text-brand-primary">Inpatient</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.rows.map((r) => (
-                      <tr
-                        key={`${g.personId}-${r.investigationType}`}
-                        className="border-b border-brand-primary-border/50 hover:bg-muted/30"
-                      >
-                        <td className="p-3">{r.investigationType}</td>
-                        <td className="p-3 text-right font-mono">{r.total}</td>
-                        <td className="p-3 text-right font-mono">{r.outpatient}</td>
-                        <td className="p-3 text-right font-mono">{r.inpatient}</td>
-                      </tr>
-                    ))}
-                    <tr className="bg-brand-primary-light font-semibold">
-                      <td className="p-3">Subtotal</td>
-                      <td className="p-3 text-right font-mono">{g.subtotal.total}</td>
-                      <td className="p-3 text-right font-mono">{g.subtotal.outpatient}</td>
-                      <td className="p-3 text-right font-mono">{g.subtotal.inpatient}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
+            )
+          })}
 
           <div className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
             <table className="w-full text-sm">

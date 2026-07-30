@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, Search, type LucideIcon } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Search, type LucideIcon } from 'lucide-react'
 import { Button } from './ui/button'
 import { formatPersonName } from '../lib/utils'
 
@@ -44,6 +44,13 @@ export interface ReportingDrReportProps {
   studyTypeLabel?: string
   /** Filter dropdown label. Defaults to "Diagnosing Physician". */
   physicianFilterLabel?: string
+  /**
+   * When true, doctor headers show totals inline and investigation-type
+   * breakdown is collapsed until the header is clicked.
+   */
+  collapsibleGroups?: boolean
+  /** Optional notice shown above the results table. */
+  resultsNotice?: string
 }
 
 export default function ReportingDrReport({
@@ -57,6 +64,8 @@ export default function ReportingDrReport({
   formatPhysicianName = formatPersonName,
   studyTypeLabel = 'Study Type',
   physicianFilterLabel = 'Diagnosing Physician',
+  collapsibleGroups = false,
+  resultsNotice,
 }: ReportingDrReportProps) {
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date()
@@ -70,6 +79,7 @@ export default function ReportingDrReport({
   const [report, setReport] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     fetch(physiciansUrl)
@@ -113,12 +123,18 @@ export default function ReportingDrReport({
         throw new Error(err.message || 'Report failed')
       }
       setReport(await res.json())
+      setExpanded({})
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Report failed')
       setReport(null)
+      setExpanded({})
     } finally {
       setLoading(false)
     }
+  }
+
+  const toggleExpanded = (key: string) => {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
   const exportCsv = () => {
@@ -205,41 +221,74 @@ export default function ReportingDrReport({
 
       {report && (
         <div className="space-y-4">
-          {report.groups.map((g) => (
-            <div key={g.physician} className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
-              <div className="bg-brand-primary text-white px-4 py-2.5 font-semibold">
-                {formatPhysicianName(g.physician)}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left p-3 font-medium text-brand-primary">{studyTypeLabel}</th>
-                      <th className="text-right p-3 font-medium text-brand-primary">Total</th>
-                      <th className="text-right p-3 font-medium text-brand-primary">Outpatient</th>
-                      <th className="text-right p-3 font-medium text-brand-primary">Inpatient</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.rows.map((r) => (
-                      <tr key={`${g.physician}-${r.studyType}`} className="border-b border-brand-primary-border/50 hover:bg-muted/30">
-                        <td className="p-3">{r.studyType}</td>
-                        <td className="p-3 text-right font-mono">{r.total}</td>
-                        <td className="p-3 text-right font-mono">{r.outpatient}</td>
-                        <td className="p-3 text-right font-mono">{r.inpatient}</td>
-                      </tr>
-                    ))}
-                    <tr className="bg-brand-primary-light font-semibold">
-                      <td className="p-3">Subtotal</td>
-                      <td className="p-3 text-right font-mono">{g.subtotal.total}</td>
-                      <td className="p-3 text-right font-mono">{g.subtotal.outpatient}</td>
-                      <td className="p-3 text-right font-mono">{g.subtotal.inpatient}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+          {resultsNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              {resultsNotice}
             </div>
-          ))}
+          )}
+          {report.groups.map((g) => {
+            const isOpen = collapsibleGroups ? Boolean(expanded[g.physician]) : true
+            const Chevron = isOpen ? ChevronDown : ChevronRight
+
+            return (
+              <div key={g.physician} className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
+                {collapsibleGroups ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleExpanded(g.physician)}
+                    aria-expanded={isOpen}
+                    className="w-full bg-brand-primary text-white px-4 py-2.5 font-semibold flex items-center gap-3 text-left hover:bg-brand-primary/90 transition-colors"
+                  >
+                    <Chevron className="h-4 w-4 shrink-0 opacity-90" />
+                    <span className="flex-1 min-w-0 truncate">{formatPhysicianName(g.physician)}</span>
+                    <span
+                      className="shrink-0 rounded-md bg-white/20 px-3 py-1 text-base sm:text-lg font-mono font-bold tracking-wide tabular-nums"
+                      title="Total studies"
+                    >
+                      {g.subtotal.total.toLocaleString()}
+                    </span>
+                  </button>
+                ) : (
+                  <div className="bg-brand-primary text-white px-4 py-2.5 font-semibold">
+                    {formatPhysicianName(g.physician)}
+                  </div>
+                )}
+
+                {isOpen && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-3 font-medium text-brand-primary">{studyTypeLabel}</th>
+                          <th className="text-right p-3 font-medium text-brand-primary">Total</th>
+                          <th className="text-right p-3 font-medium text-brand-primary">Outpatient</th>
+                          <th className="text-right p-3 font-medium text-brand-primary">Inpatient</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.rows.map((r) => (
+                          <tr key={`${g.physician}-${r.studyType}`} className="border-b border-brand-primary-border/50 hover:bg-muted/30">
+                            <td className="p-3">{r.studyType}</td>
+                            <td className="p-3 text-right font-mono">{r.total}</td>
+                            <td className="p-3 text-right font-mono">{r.outpatient}</td>
+                            <td className="p-3 text-right font-mono">{r.inpatient}</td>
+                          </tr>
+                        ))}
+                        {!collapsibleGroups && (
+                          <tr className="bg-brand-primary-light font-semibold">
+                            <td className="p-3">Subtotal</td>
+                            <td className="p-3 text-right font-mono">{g.subtotal.total}</td>
+                            <td className="p-3 text-right font-mono">{g.subtotal.outpatient}</td>
+                            <td className="p-3 text-right font-mono">{g.subtotal.inpatient}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
 
           <div className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
             <table className="w-full text-sm">

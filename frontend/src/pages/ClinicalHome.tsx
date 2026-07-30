@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Stethoscope, ArrowRight, Users } from 'lucide-react'
+import { Stethoscope, ArrowRight, Users, Building2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 interface ClinicalAction {
@@ -27,6 +27,12 @@ const CLINICAL_ACTIONS: ClinicalAction[] = [
     description: 'Top referring doctors by person, with investigation-type breakdown (Oracle CM2).',
     path: '/clinical/top-referring-doctors-cm2',
     icon: Users,
+  },
+  {
+    title: 'Top Referring Practices - CM2',
+    description: 'Top referring practices, then doctors by provider number, then investigation types.',
+    path: '/clinical/top-referring-practices-cm2',
+    icon: Building2,
   },
 ]
 

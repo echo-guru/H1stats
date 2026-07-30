@@ -83,6 +83,7 @@ public class ClinicalController : ControllerBase
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
         [FromQuery] int? top,
+        [FromQuery] string? investigationType,
         CancellationToken ct)
     {
         if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
@@ -91,7 +92,37 @@ public class ClinicalController : ControllerBase
         try
         {
             var topN = Cm2TopN.Clamp(top);
-            var report = await _cm2.GetTopReferringDoctorsAsync(from, to, topN, ct);
+            var report = await _cm2.GetTopReferringDoctorsAsync(from, to, topN, investigationType, ct);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/investigation-types")]
+    public IActionResult GetCm2InvestigationTypes()
+    {
+        var list = Cm2InvestigationTypeMapping.ForReferringDoctors
+            .Select(x => new { id = x.Code, displayName = x.DisplayName });
+        return Ok(list);
+    }
+
+    [HttpGet("cm2/top-referring-practices")]
+    public async Task<IActionResult> GetTopReferringPractices(
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] int? top,
+        CancellationToken ct)
+    {
+        if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var topN = Cm2TopN.Clamp(top);
+            var report = await _cm2.GetTopReferringPracticesAsync(from, to, topN, ct);
             return Ok(report);
         }
         catch (Exception ex)

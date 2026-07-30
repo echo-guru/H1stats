@@ -14,6 +14,8 @@ export default function ReportingDrCm2() {
       formatPhysicianName={(name) => name}
       studyTypeLabel="Investigation Type"
       physicianFilterLabel="Reporting Cardiologist"
+      collapsibleGroups
+      resultsNotice="Imaging work only: Transthoracic Echo, Exercise Stress Echo, Dobutamine Stress Echo, and Transoesophageal Echo. ECG, Holter, event monitor, and blood pressure studies are excluded because reporting attribution for those modalities is not reliable in this data."
     />
   )
 }

@@ -63,7 +63,8 @@ Dashboard
 Clinical
   ├── Reporting Dr - Syngo (Physician Statistics)
   ├── Reporting Dr - CM2
-  └── Top Referring Doctors - CM2
+  ├── Top Referring Doctors - CM2
+  └── Top Referring Practices - CM2
 Administration
   ├── Users
   ├── Roles
@@ -125,11 +126,14 @@ Excel, CSV. PDF planned.
 
 Grouped by Reporting Cardiologist → Investigation Type. Columns: Investigation Type, Total, Outpatient, Inpatient.
 
+**Scope (current):** Imaging investigations only — `TEST_REQUIRED` in (1, 2, 3, 4): Transthoracic Echo, Exercise Stress Echo, Dobutamine Stress Echo, Transoesophageal Echo. ECG / Holter / event / BP are excluded.
+
 ## Clinical Module — Top Referring Doctors (CM2)
 
 ### Filters
 
 - Date From / Date To
+- Investigation Type (default: **All tests**; filters `TEST.TEST_REQUIRED`)
 - Top N (editable; default **50**; server clamp 1–500)
 
 ### Database Mapping
@@ -148,6 +152,25 @@ Grouped by Reporting Cardiologist → Investigation Type. Columns: Investigation
 ### Report Output
 
 Ranked by total studies (DESC), top N. Grouped by Referring Doctor → Investigation Type. Columns: Investigation Type, Total, Outpatient, Inpatient. Doctor subtotals and grand totals.
+
+### Export
+
+CSV.
+
+## Clinical Module — Top Referring Practices (CM2)
+
+### Filters
+
+- Date From / Date To
+- Top N (editable; default **50**; server clamp 1–500)
+
+### Hierarchy
+
+1. **Practice** (`CM2_PRACTICE` via `DOCTOR.CM2_PRACTICE_RID`) — ranked by total referrals
+2. **Referring doctor / provider** within practice — by normalised Medicare provider number (fallback: legacy `DOCTOR_RID`), sorted by total descending
+3. **Investigation type** for that provider — Total / Outpatient / Inpatient
+
+Resting ECG (`TEST_REQUIRED = 5`) is excluded, consistent with Top Referring Doctors.
 
 ### Export
 

@@ -66,6 +66,7 @@ Source: `TEST.CARDIOLOGIST1` — **not** a `DOCTOR_RID`. Curated lookup only.
 
 | Cardiologist ID | Display name |
 |-----------------|--------------|
+| 1 | Undefined Dr |
 | 1681 | Dr Vance Manins |
 | 282 | Dr Julie Ch'ng |
 | 1941 | Dr Justin Morze |

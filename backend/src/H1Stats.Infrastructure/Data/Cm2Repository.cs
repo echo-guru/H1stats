@@ -53,7 +53,8 @@ public class Cm2Repository : ICm2Repository
 
         return ids
             .Select(id => new CardiologistOption(id, Cm2CardiologistMapping.ResolveDisplayName(id)))
-            .OrderBy(c => c.DisplayName)
+            .OrderBy(c => Cm2CardiologistMapping.IsUndefinedId(c.Id) ? 1 : 0)
+            .ThenBy(c => c.DisplayName)
             .ToList();
     }
 
@@ -74,6 +75,7 @@ public class Cm2Repository : ICm2Repository
             FROM {Schema}.TEST t
             WHERE t.TEST_DATE >= :DateFrom
               AND t.TEST_DATE < :DateToExclusive
+              AND t.TEST_REQUIRED IN (1, 2, 3, 4)
               {physicianFilter}
             GROUP BY
                 TRIM(t.CARDIOLOGIST1),
@@ -108,12 +110,10 @@ public class Cm2Repository : ICm2Repository
 
         var grouped = rows
             .GroupBy(r => r.Physician)
-            .OrderBy(g => g.Key)
             .Select(physGroup =>
             {
                 var statRows = physGroup
                     .GroupBy(r => r.StudyType)
-                    .OrderBy(g => g.Key)
                     .Select(typeGroup =>
                     {
                         var total = typeGroup.Sum(r => r.Count);
@@ -126,6 +126,8 @@ public class Cm2Repository : ICm2Repository
                         return new PhysicianStatRow(
                             physGroup.Key, typeGroup.Key, total, outpatient, inpatient);
                     })
+                    .OrderByDescending(r => r.Total)
+                    .ThenBy(r => r.StudyType)
                     .ToList();
 
                 var sub = new CountTriple(
@@ -135,6 +137,9 @@ public class Cm2Repository : ICm2Repository
 
                 return new PhysicianGroup(physGroup.Key, statRows, sub);
             })
+            .OrderBy(g => Cm2CardiologistMapping.IsUndefinedDisplayName(g.Physician) ? 1 : 0)
+            .ThenByDescending(g => g.Subtotal.Total)
+            .ThenBy(g => g.Physician)
             .ToList();
 
         var grand = new CountTriple(
@@ -146,9 +151,13 @@ public class Cm2Repository : ICm2Repository
     }
 
     public async Task<TopReferringDoctorsReport> GetTopReferringDoctorsAsync(
-        DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default)
+        DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, CancellationToken ct = default)
     {
         topN = Cm2TopN.Clamp(topN);
+        var typeCode = Cm2InvestigationTypeMapping.ResolveReferringDoctorCode(investigationType);
+        var typeFilter = string.IsNullOrWhiteSpace(typeCode)
+            ? "AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)"
+            : "AND t.TEST_REQUIRED = :InvestigationType";
 
         var sql = $"""
             SELECT
@@ -189,6 +198,7 @@ public class Cm2Repository : ICm2Repository
               ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
             WHERE t.TEST_DATE >= :DateFrom
               AND t.TEST_DATE < :DateToExclusive
+              {typeFilter}
             GROUP BY
                 CASE
                     WHEN d.CM2_DOCTOR_RID IS NOT NULL
@@ -229,6 +239,8 @@ public class Cm2Repository : ICm2Repository
         cmd.CommandText = sql;
         cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom.ToDateTime(TimeOnly.MinValue);
         cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        if (!string.IsNullOrWhiteSpace(typeCode))
+            cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -295,6 +307,272 @@ public class Cm2Repository : ICm2Repository
             groups.Sum(g => g.Subtotal.Outpatient),
             groups.Sum(g => g.Subtotal.Inpatient));
 
-        return new TopReferringDoctorsReport(groups, grand, topN);
+        return new TopReferringDoctorsReport(
+            groups,
+            grand,
+            topN,
+            string.IsNullOrWhiteSpace(typeCode)
+                ? null
+                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode));
+    }
+
+    public async Task<TopReferringPracticesReport> GetTopReferringPracticesAsync(
+        DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default)
+    {
+        topN = Cm2TopN.Clamp(topN);
+        const string validProviderRegex = "^[0-9]{6}[0-9A-Z]{2}$";
+
+        // Practice → provider number (referring Dr at location) → investigation type.
+        // Resting ECG excluded (same set as Top Referring Doctors).
+        var sql = $"""
+            SELECT
+                CASE
+                    WHEN d.CM2_PRACTICE_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_PRACTICE_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_PRACTICE_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_PRACTICE_RID))
+                    ELSE 'UNRESOLVED'
+                END AS PracticeId,
+                CASE
+                    WHEN cp.CM2_PRACTICE_RID IS NOT NULL THEN
+                        NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NVL(NULLIF(TRIM(cp.PRAC_ALIAS), ''), 'Unnamed Practice'))
+                    ELSE 'Unresolved Practice'
+                END AS PracticeName,
+                CASE
+                    WHEN cp.CM2_PRACTICE_RID IS NOT NULL THEN NULLIF(TRIM(cp.PRAC_SA_SUBURB), '')
+                    ELSE NULLIF(TRIM(d.DOCTOR_SUBURB), '')
+                END AS Suburb,
+                CASE
+                    WHEN REGEXP_LIKE(
+                        UPPER(REGEXP_REPLACE(TRIM(NVL(d.DOCTOR_PROV_ID, '')), '[^0-9A-Z]', '')),
+                        '{validProviderRegex}')
+                    THEN UPPER(REGEXP_REPLACE(TRIM(d.DOCTOR_PROV_ID), '[^0-9A-Z]', ''))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END AS ProviderKey,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
+                END AS DoctorName,
+                CASE
+                    WHEN REGEXP_LIKE(
+                        UPPER(REGEXP_REPLACE(TRIM(NVL(d.DOCTOR_PROV_ID, '')), '[^0-9A-Z]', '')),
+                        '{validProviderRegex}')
+                    THEN UPPER(REGEXP_REPLACE(TRIM(d.DOCTOR_PROV_ID), '[^0-9A-Z]', ''))
+                    ELSE NULL
+                END AS ProviderNumber,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '') AS InvestigationTypeCode,
+                NULLIF(TRIM(t.WARD), '') AS Ward,
+                COUNT(DISTINCT t.TEST_RID) AS StudyCount
+            FROM {Schema}.TEST t
+            LEFT JOIN {Schema}.DOCTOR d
+              ON d.DOCTOR_RID = t.REFERRING_DOCTOR
+            LEFT JOIN {Schema}.CM2_DOCTOR cd
+              ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
+            LEFT JOIN {Schema}.CM2_PRACTICE cp
+              ON cp.CM2_PRACTICE_RID = d.CM2_PRACTICE_RID
+            WHERE t.TEST_DATE >= :DateFrom
+              AND t.TEST_DATE < :DateToExclusive
+              AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)
+            GROUP BY
+                CASE
+                    WHEN d.CM2_PRACTICE_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_PRACTICE_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_PRACTICE_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_PRACTICE_RID))
+                    ELSE 'UNRESOLVED'
+                END,
+                CASE
+                    WHEN cp.CM2_PRACTICE_RID IS NOT NULL THEN
+                        NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NVL(NULLIF(TRIM(cp.PRAC_ALIAS), ''), 'Unnamed Practice'))
+                    ELSE 'Unresolved Practice'
+                END,
+                CASE
+                    WHEN cp.CM2_PRACTICE_RID IS NOT NULL THEN NULLIF(TRIM(cp.PRAC_SA_SUBURB), '')
+                    ELSE NULLIF(TRIM(d.DOCTOR_SUBURB), '')
+                END,
+                CASE
+                    WHEN REGEXP_LIKE(
+                        UPPER(REGEXP_REPLACE(TRIM(NVL(d.DOCTOR_PROV_ID, '')), '[^0-9A-Z]', '')),
+                        '{validProviderRegex}')
+                    THEN UPPER(REGEXP_REPLACE(TRIM(d.DOCTOR_PROV_ID), '[^0-9A-Z]', ''))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
+                END,
+                CASE
+                    WHEN REGEXP_LIKE(
+                        UPPER(REGEXP_REPLACE(TRIM(NVL(d.DOCTOR_PROV_ID, '')), '[^0-9A-Z]', '')),
+                        '{validProviderRegex}')
+                    THEN UPPER(REGEXP_REPLACE(TRIM(d.DOCTOR_PROV_ID), '[^0-9A-Z]', ''))
+                    ELSE NULL
+                END,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), ''),
+                NULLIF(TRIM(t.WARD), '')
+            """;
+
+        var rows = new List<(
+            string PracticeId, string PracticeName, string? Suburb,
+            string ProviderKey, string DoctorName, string? ProviderNumber,
+            string InvestigationType, string? Ward, int Count)>();
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var practiceId = reader.IsDBNull(0) ? "UNRESOLVED" : reader.GetString(0);
+            var practiceName = reader.IsDBNull(1) ? "Unresolved Practice" : reader.GetString(1);
+            var suburb = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var providerKey = reader.IsDBNull(3) ? "UNKNOWN" : reader.GetString(3);
+            var doctorName = reader.IsDBNull(4) ? null : reader.GetString(4)?.Trim();
+            var providerNumber = reader.IsDBNull(5) ? null : reader.GetString(5);
+            var rawType = reader.IsDBNull(6) ? null : reader.GetString(6);
+            var ward = reader.IsDBNull(7) ? null : reader.GetString(7);
+            var count = Convert.ToInt32(reader.GetValue(8));
+
+            if (string.IsNullOrWhiteSpace(doctorName))
+                doctorName = providerNumber ?? providerKey;
+
+            rows.Add((
+                practiceId,
+                practiceName,
+                suburb,
+                providerKey,
+                doctorName,
+                providerNumber,
+                Cm2InvestigationTypeMapping.ResolveDisplayName(rawType),
+                ward,
+                count));
+        }
+
+        var practiceGroups = rows
+            .GroupBy(r => r.PracticeId, StringComparer.OrdinalIgnoreCase)
+            .Select(pg =>
+            {
+                var practiceName = pg
+                    .Select(r => r.PracticeName)
+                    .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
+                    ?? "Unresolved Practice";
+                var suburb = pg.Select(r => r.Suburb).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
+                var total = pg.Sum(r => r.Count);
+
+                var doctors = pg
+                    .GroupBy(r => r.ProviderKey, StringComparer.OrdinalIgnoreCase)
+                    .Select(dg =>
+                    {
+                        var doctorName = dg
+                            .Select(r => r.DoctorName)
+                            .Where(n => !string.IsNullOrWhiteSpace(n))
+                            .GroupBy(n => n!, StringComparer.OrdinalIgnoreCase)
+                            .OrderByDescending(g => g.Count())
+                            .Select(g => g.Key)
+                            .FirstOrDefault()
+                            ?? dg.Key;
+                        var providerNumber = dg
+                            .Select(r => r.ProviderNumber)
+                            .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p));
+
+                        var testRows = dg
+                            .GroupBy(r => r.InvestigationType)
+                            .Select(tg =>
+                            {
+                                var t = tg.Sum(r => r.Count);
+                                var op = tg.Where(r => WardClassification.IsCm2Outpatient(r.Ward)).Sum(r => r.Count);
+                                var ip = tg.Where(r => WardClassification.IsCm2Inpatient(r.Ward)).Sum(r => r.Count);
+                                return new ReferringPracticeTestRow(tg.Key, t, op, ip);
+                            })
+                            .OrderByDescending(r => r.Total)
+                            .ThenBy(r => r.InvestigationType)
+                            .ToList();
+
+                        var doctorSub = new CountTriple(
+                            testRows.Sum(r => r.Total),
+                            testRows.Sum(r => r.Outpatient),
+                            testRows.Sum(r => r.Inpatient));
+
+                        return new ReferringPracticeDoctor(
+                            dg.Key, doctorName, providerNumber, testRows, doctorSub);
+                    })
+                    .OrderByDescending(d => d.Subtotal.Total)
+                    .ThenBy(d => d.DisplayName)
+                    .ToList();
+
+                var practiceSub = new CountTriple(
+                    doctors.Sum(d => d.Subtotal.Total),
+                    doctors.Sum(d => d.Subtotal.Outpatient),
+                    doctors.Sum(d => d.Subtotal.Inpatient));
+
+                return new
+                {
+                    PracticeId = pg.Key,
+                    PracticeName = practiceName,
+                    Suburb = suburb,
+                    Total = total,
+                    Doctors = doctors,
+                    Subtotal = practiceSub,
+                };
+            })
+            .OrderByDescending(p => p.Total)
+            .ThenBy(p => p.PracticeName)
+            .Take(topN)
+            .ToList();
+
+        var groups = practiceGroups
+            .Select((p, index) => new ReferringPracticeGroup(
+                index + 1,
+                p.PracticeId,
+                p.PracticeName,
+                p.Suburb,
+                p.Doctors,
+                p.Subtotal))
+            .ToList();
+
+        var grand = new CountTriple(
+            groups.Sum(g => g.Subtotal.Total),
+            groups.Sum(g => g.Subtotal.Outpatient),
+            groups.Sum(g => g.Subtotal.Inpatient));
+
+        return new TopReferringPracticesReport(groups, grand, topN);
     }
 }
+

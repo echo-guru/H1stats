@@ -34,6 +34,8 @@ public interface ICm2Repository
     Task<PhysicianStatisticsReport> GetReportingDrReportAsync(
         DateOnly dateFrom, DateOnly dateTo, string? cardiologist, CancellationToken ct = default);
     Task<TopReferringDoctorsReport> GetTopReferringDoctorsAsync(
+        DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, CancellationToken ct = default);
+    Task<TopReferringPracticesReport> GetTopReferringPracticesAsync(
         DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default);
 }
 

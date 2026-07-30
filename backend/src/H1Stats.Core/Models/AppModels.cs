@@ -89,6 +89,37 @@ public record ReferringDoctorGroup(
 public record TopReferringDoctorsReport(
     IReadOnlyList<ReferringDoctorGroup> Groups,
     CountTriple GrandTotal,
+    int TopN,
+    string? InvestigationTypeFilter = null
+);
+
+public record ReferringPracticeTestRow(
+    string InvestigationType,
+    int Total,
+    int Outpatient,
+    int Inpatient
+);
+
+public record ReferringPracticeDoctor(
+    string ProviderKey,
+    string DisplayName,
+    string? ProviderNumber,
+    IReadOnlyList<ReferringPracticeTestRow> Rows,
+    CountTriple Subtotal
+);
+
+public record ReferringPracticeGroup(
+    int Rank,
+    string PracticeId,
+    string PracticeName,
+    string? Suburb,
+    IReadOnlyList<ReferringPracticeDoctor> Doctors,
+    CountTriple Subtotal
+);
+
+public record TopReferringPracticesReport(
+    IReadOnlyList<ReferringPracticeGroup> Groups,
+    CountTriple GrandTotal,
     int TopN
 );
 

@@ -37,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/clinical/physician-statistics', label: 'Reporting Dr - Syngo' },
       { path: '/clinical/reporting-dr-cm2', label: 'Reporting Dr - CM2' },
       { path: '/clinical/top-referring-doctors-cm2', label: 'Top Referring Doctors - CM2' },
+      { path: '/clinical/top-referring-practices-cm2', label: 'Top Referring Practices - CM2' },
     ],
   },
   {
