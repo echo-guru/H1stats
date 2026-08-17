@@ -66,7 +66,8 @@ Clinical
   ├── Top Referring Doctors - CM2
   ├── Top Referring Practices - CM2
   ├── Referrers Growth by Quarter - CM2
-  └── Referrers Decline by Quarter - CM2
+  ├── Referrers Decline by Quarter - CM2
+  └── Referrer 12-Month History - CM2
 Administration
   ├── Users
   ├── Roles
@@ -209,6 +210,25 @@ Same filters and expandable investigation-type breakdown as Referrers Growth.
 1. Take referring doctors with activity in the **previous quarter**
 2. Keep only those with a **negative** change in the selected quarter (includes drops to zero)
 3. Rank by largest absolute drop or largest % drop
+
+### Export
+
+CSV.
+
+## Clinical Module — Referrer 12-Month History (CM2)
+
+### Filters
+
+- Search by **Doctor** or **Practice** (required; typeahead)
+- Investigation Type (default: **All tests**; Resting ECG excluded)
+
+Date range is fixed: the current calendar month plus the previous 11 months.
+
+### Logic
+
+1. **Doctor** — person grain (`CM2_DOCTOR_RID`, else unresolved legacy `DOCTOR_RID`). Totals combine every practice location that person referred from, and all Hearts 1st sites.
+2. **Practice** — `CM2_PRACTICE_RID`.
+3. Show 12 month rows (zero-filled) with Total / Outpatient / Inpatient. Expand a month for investigation-type breakdown.
 
 ### Export
 

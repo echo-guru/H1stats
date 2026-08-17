@@ -12,6 +12,13 @@ public class AuthController : ControllerBase
 
     public AuthController(IAuthService auth) => _auth = auth;
 
+    [HttpGet("usernames")]
+    public async Task<IActionResult> ListUsernames(CancellationToken ct)
+    {
+        var names = await _auth.ListEnabledUsernamesAsync(ct);
+        return Ok(names);
+    }
+
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken ct)
     {

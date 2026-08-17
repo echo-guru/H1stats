@@ -1,18 +1,23 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { LogIn, BarChart3 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { useAuth } from '../contexts/AuthContext'
 import { canAccessPath, defaultPathForUser } from '../utils/permissions'
 
+const LAST_USERNAME_KEY = 'h1stats_last_username'
+const FALLBACK_USERNAMES = ['admin', 'clinical', 'tonyf']
+
 export default function Login() {
-  const [username, setUsername] = useState('')
+  const [usernames, setUsernames] = useState<string[]>([])
+  const [username, setUsername] = useState(() => localStorage.getItem(LAST_USERNAME_KEY) ?? '')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { login, username: currentUser, isAdmin, modules } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const passwordRef = useRef<HTMLInputElement>(null)
 
   const resolveRedirect = (nextIsAdmin: boolean, nextModules: typeof modules) => {
     const perms = { username: username.trim(), isAdmin: nextIsAdmin, modules: nextModules }
@@ -27,6 +32,38 @@ export default function Login() {
     }
   }, [currentUser, isAdmin, modules, navigate])
 
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/auth/usernames')
+      .then((r) => (r.ok ? r.json() : FALLBACK_USERNAMES))
+      .then((list) => {
+        if (cancelled) return
+        const names = Array.isArray(list)
+          ? list.map((item: unknown) => String(item)).filter(Boolean)
+          : FALLBACK_USERNAMES
+        setUsernames(names.length > 0 ? names : FALLBACK_USERNAMES)
+      })
+      .catch(() => {
+        if (!cancelled) setUsernames(FALLBACK_USERNAMES)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (usernames.length === 0) return
+    if (username && usernames.includes(username)) return
+    const last = localStorage.getItem(LAST_USERNAME_KEY)
+    setUsername(last && usernames.includes(last) ? last : usernames[0])
+  }, [usernames, username])
+
+  const handleUserChange = (value: string) => {
+    setUsername(value)
+    setPassword('')
+    passwordRef.current?.focus()
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -34,6 +71,7 @@ export default function Login() {
     const result = await login(username.trim(), password)
     setLoading(false)
     if (result.success) {
+      localStorage.setItem(LAST_USERNAME_KEY, username.trim())
       navigate(resolveRedirect(Boolean(result.isAdmin), result.modules ?? []), { replace: true })
     } else {
       setError(result.error || 'Login failed')
@@ -53,18 +91,24 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Username</label>
-            <input
-              type="text"
+            <select
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
+              onChange={(e) => handleUserChange(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary"
               autoComplete="username"
               autoFocus
-            />
+              required
+            >
+              {usernames.length === 0 && <option value="">Loading users…</option>}
+              {usernames.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Password</label>
             <input
+              ref={passwordRef}
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -77,7 +121,7 @@ export default function Login() {
             type="submit"
             variant="brand"
             className="w-full gap-2"
-            disabled={loading}
+            disabled={loading || !username}
           >
             <LogIn className="h-4 w-4" />
             {loading ? 'Signing in…' : 'Sign in'}

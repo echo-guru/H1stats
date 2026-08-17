@@ -161,6 +161,37 @@ public record ReferrersGrowthReport(
     string? SiteFilter = null
 );
 
+public record ReferrerSearchHit(
+    string Id,
+    string DisplayName,
+    string? SecondaryText = null);
+
+public record ReferrerHistoryTestRow(
+    string InvestigationType,
+    int Total,
+    int Outpatient,
+    int Inpatient);
+
+public record ReferrerHistoryMonthRow(
+    string YearMonth,
+    string Label,
+    int Total,
+    int Outpatient,
+    int Inpatient,
+    IReadOnlyList<ReferrerHistoryTestRow> TestRows);
+
+public record ReferrerHistoryReport(
+    string Mode,
+    string EntityId,
+    string DisplayName,
+    string? Suburb,
+    DateOnly DateFrom,
+    DateOnly DateTo,
+    IReadOnlyList<string> CombinedSites,
+    IReadOnlyList<ReferrerHistoryMonthRow> Months,
+    CountTriple GrandTotal,
+    string? InvestigationTypeFilter = null);
+
 public record ConnectionTestResult(bool Connected, string Message, DateTime? TestedAt = null);
 
 public record DatabaseConnectionTestResult(

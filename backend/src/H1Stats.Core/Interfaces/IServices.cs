@@ -7,6 +7,7 @@ public interface IAuthService
 {
     Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task LogoutAsync(string username, CancellationToken ct = default);
+    Task<IReadOnlyList<string>> ListEnabledUsernamesAsync(CancellationToken ct = default);
 }
 
 public interface IUserAdminService
@@ -40,6 +41,10 @@ public interface ICm2Repository
         DateOnly dateFrom, DateOnly dateTo, int topN, string? site, CancellationToken ct = default);
     Task<ReferrersGrowthReport> GetReferrersGrowthByQuarterAsync(
         int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, string? site, CancellationToken ct = default);
+    Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringDoctorsAsync(string query, CancellationToken ct = default);
+    Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringPracticesAsync(string query, CancellationToken ct = default);
+    Task<ReferrerHistoryReport> GetReferrerHistoryAsync(
+        string mode, string entityId, string? investigationType, CancellationToken ct = default);
 }
 
 public interface IDatabaseConnectionService

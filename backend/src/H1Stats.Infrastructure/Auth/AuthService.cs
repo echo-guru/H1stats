@@ -62,6 +62,18 @@ public class AuthService : IAuthService, IUserAdminService
     public Task LogoutAsync(string username, CancellationToken ct = default) =>
         Task.CompletedTask;
 
+    public Task<IReadOnlyList<string>> ListEnabledUsernamesAsync(CancellationToken ct = default)
+    {
+        lock (_lock)
+        {
+            return Task.FromResult<IReadOnlyList<string>>(_users
+                .Where(u => !u.IsDisabled)
+                .Select(u => u.Username)
+                .OrderBy(u => u, StringComparer.OrdinalIgnoreCase)
+                .ToList());
+        }
+    }
+
     public Task<IReadOnlyList<UserDto>> ListUsersAsync(CancellationToken ct = default)
     {
         lock (_lock)

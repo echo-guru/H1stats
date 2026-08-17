@@ -29,7 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     path: '/clinical',
-    label: 'Clinical',
+    label: 'Reports',
     icon: Stethoscope,
     module: 'clinical',
     children: [
@@ -40,11 +40,12 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/clinical/top-referring-practices-cm2', label: 'Top Referring Practices - CM2' },
       { path: '/clinical/referrers-growth-cm2', label: 'Referrers Growth by Quarter - CM2' },
       { path: '/clinical/referrers-decline-cm2', label: 'Referrers Decline by Quarter - CM2' },
+      { path: '/clinical/referrer-history-cm2', label: 'Referrer 12-Month History - CM2' },
     ],
   },
   {
     path: '/admin',
-    label: 'Administration',
+    label: 'Settings',
     icon: Settings,
     module: 'administration',
     children: [

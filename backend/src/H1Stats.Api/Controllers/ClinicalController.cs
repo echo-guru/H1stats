@@ -183,6 +183,63 @@ public class ClinicalController : ControllerBase
         return Ok(new { year = q.Year, quarter = q.Quarter, label = q.Label });
     }
 
+    [HttpGet("cm2/referring-doctors/search")]
+    public async Task<IActionResult> SearchReferringDoctors([FromQuery] string? q, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _cm2.SearchReferringDoctorsAsync(q ?? string.Empty, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/referring-practices/search")]
+    public async Task<IActionResult> SearchReferringPractices([FromQuery] string? q, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _cm2.SearchReferringPracticesAsync(q ?? string.Empty, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/referrer-history")]
+    public async Task<IActionResult> GetReferrerHistory(
+        [FromQuery] string? mode,
+        [FromQuery] string? id,
+        [FromQuery] string? investigationType,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return BadRequest(new { message = "mode is required (doctor or practice)" });
+        if (string.IsNullOrWhiteSpace(id))
+            return BadRequest(new { message = "id is required" });
+
+        try
+        {
+            var report = await _cm2.GetReferrerHistoryAsync(mode, id, investigationType, ct);
+            return Ok(report);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     private static bool TryParseDateRange(
         string? dateFrom, string? dateTo, out DateOnly from, out DateOnly to, out string? error)
     {

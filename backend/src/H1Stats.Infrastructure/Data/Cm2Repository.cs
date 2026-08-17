@@ -873,6 +873,397 @@ public class Cm2Repository : ICm2Repository
                 : Cm2SiteMapping.ResolveDisplayName(siteCode));
     }
 
+    public async Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringDoctorsAsync(
+        string query, CancellationToken ct = default)
+    {
+        var like = LikeContains(query);
+        if (like is null)
+            return [];
+
+        var sql = $"""
+            SELECT PersonId, DisplayName, Hint
+            FROM (
+                SELECT
+                    CASE
+                        WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                             AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                             AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                        THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                        WHEN d.DOCTOR_RID IS NOT NULL
+                             AND TRIM(TO_CHAR(d.DOCTOR_RID)) IS NOT NULL
+                             AND TRIM(TO_CHAR(d.DOCTOR_RID)) NOT IN ('0', '1')
+                        THEN 'LEGACY:' || TRIM(TO_CHAR(d.DOCTOR_RID))
+                        ELSE NULL
+                    END AS PersonId,
+                    CASE
+                        WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                            TRIM(
+                                NVL(cd.DOC_TITLE || ' ', '') ||
+                                NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                                NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                                NVL(cd.DOC_LASTNAME, '')
+                            )
+                        ELSE
+                            TRIM(
+                                NVL(d.DOCTOR_TITLE || ' ', '') ||
+                                NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                                NVL(d.DOCTOR_LASTNAME, '')
+                            )
+                    END AS DisplayName,
+                    NVL(
+                        NULLIF(TRIM(cp.PRAC_SA_SUBURB), ''),
+                        NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NULLIF(TRIM(d.DOCTOR_SUBURB), ''))
+                    ) AS Hint
+                FROM {Schema}.DOCTOR d
+                LEFT JOIN {Schema}.CM2_DOCTOR cd
+                  ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
+                LEFT JOIN {Schema}.CM2_PRACTICE cp
+                  ON cp.CM2_PRACTICE_RID = d.CM2_PRACTICE_RID
+                WHERE UPPER(NVL(cd.DOC_LASTNAME, '') || ', ' || NVL(cd.DOC_FIRSTNAME, '')) LIKE :Query ESCAPE '!'
+                   OR UPPER(NVL(cd.DOC_FIRSTNAME, '') || ' ' || NVL(cd.DOC_LASTNAME, '')) LIKE :Query ESCAPE '!'
+                   OR UPPER(NVL(cd.DOC_LASTNAME, '')) LIKE :Query ESCAPE '!'
+                   OR UPPER(NVL(d.DOCTOR_LASTNAME, '') || ', ' || NVL(d.DOCTOR_FIRSTNAME, '')) LIKE :Query ESCAPE '!'
+                   OR UPPER(NVL(d.DOCTOR_FIRSTNAME, '') || ' ' || NVL(d.DOCTOR_LASTNAME, '')) LIKE :Query ESCAPE '!'
+                   OR UPPER(NVL(d.DOCTOR_LASTNAME, '')) LIKE :Query ESCAPE '!'
+            ) src
+            WHERE PersonId IS NOT NULL
+              AND ROWNUM <= 500
+            """;
+
+        var raw = new List<(string Id, string DisplayName, string? Hint)>();
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("Query", OracleDbType.Varchar2).Value = like;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var id = reader.IsDBNull(0) ? null : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            var name = reader.IsDBNull(1) ? null : reader.GetString(1)?.Trim();
+            var hint = reader.IsDBNull(2) ? null : reader.GetString(2)?.Trim();
+            raw.Add((id, string.IsNullOrWhiteSpace(name) ? id : name, string.IsNullOrWhiteSpace(hint) ? null : hint));
+        }
+
+        return raw
+            .GroupBy(r => r.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var name = g
+                    .Select(r => r.DisplayName)
+                    .Where(n => !string.IsNullOrWhiteSpace(n) && !n.StartsWith("CM2:", StringComparison.OrdinalIgnoreCase) && !n.StartsWith("LEGACY:", StringComparison.OrdinalIgnoreCase))
+                    .DefaultIfEmpty(g.First().DisplayName)
+                    .First();
+                var hint = g.Select(r => r.Hint).FirstOrDefault(h => !string.IsNullOrWhiteSpace(h));
+                return new ReferrerSearchHit(g.Key, name, hint);
+            })
+            .OrderBy(h => h.DisplayName)
+            .ThenBy(h => h.SecondaryText)
+            .Take(40)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringPracticesAsync(
+        string query, CancellationToken ct = default)
+    {
+        var like = LikeContains(query);
+        if (like is null)
+            return [];
+
+        var sql = $"""
+            SELECT Id, DisplayName, Suburb
+            FROM (
+                SELECT
+                    'CM2:' || TRIM(TO_CHAR(cp.CM2_PRACTICE_RID)) AS Id,
+                    NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NVL(NULLIF(TRIM(cp.PRAC_ALIAS), ''), 'Unnamed Practice')) AS DisplayName,
+                    NULLIF(TRIM(cp.PRAC_SA_SUBURB), '') AS Suburb
+                FROM {Schema}.CM2_PRACTICE cp
+                WHERE cp.CM2_PRACTICE_RID IS NOT NULL
+                  AND TRIM(TO_CHAR(cp.CM2_PRACTICE_RID)) IS NOT NULL
+                  AND TRIM(TO_CHAR(cp.CM2_PRACTICE_RID)) NOT IN ('0', '1')
+                  AND (
+                      UPPER(NVL(cp.PRAC_NAME, '')) LIKE :Query ESCAPE '!'
+                      OR UPPER(NVL(cp.PRAC_ALIAS, '')) LIKE :Query ESCAPE '!'
+                      OR UPPER(NVL(cp.PRAC_SA_SUBURB, '')) LIKE :Query ESCAPE '!'
+                  )
+                ORDER BY DisplayName, Suburb
+            )
+            WHERE ROWNUM <= 40
+            """;
+
+        var list = new List<ReferrerSearchHit>();
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("Query", OracleDbType.Varchar2).Value = like;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var id = reader.IsDBNull(0) ? null : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            var name = reader.IsDBNull(1) ? "Unnamed Practice" : reader.GetString(1);
+            var suburb = reader.IsDBNull(2) ? null : reader.GetString(2);
+            list.Add(new ReferrerSearchHit(id, name, string.IsNullOrWhiteSpace(suburb) ? null : suburb));
+        }
+
+        return list;
+    }
+
+    public async Task<ReferrerHistoryReport> GetReferrerHistoryAsync(
+        string mode, string entityId, string? investigationType, CancellationToken ct = default)
+    {
+        var isPractice = string.Equals(mode, "practice", StringComparison.OrdinalIgnoreCase);
+        var isDoctor = string.Equals(mode, "doctor", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mode, "dr", StringComparison.OrdinalIgnoreCase);
+        if (!isPractice && !isDoctor)
+            throw new ArgumentException("mode must be doctor or practice.", nameof(mode));
+
+        var modeKey = isPractice ? "practice" : "doctor";
+        if (!TryParseEntityId(entityId, out var idKind, out var rid))
+            throw new ArgumentException("Invalid id. Expected CM2:{rid} or LEGACY:{rid}.", nameof(entityId));
+        if (isPractice && idKind != "CM2")
+            throw new ArgumentException("Practice search requires a CM2 practice id.", nameof(entityId));
+
+        var window = MonthPeriod.Prior12();
+        var typeCode = Cm2InvestigationTypeMapping.ResolveReferringDoctorCode(investigationType);
+        var typeFilter = string.IsNullOrWhiteSpace(typeCode)
+            ? "AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)"
+            : "AND t.TEST_REQUIRED = :InvestigationType";
+        var entityFilter = isPractice
+            ? "AND d.CM2_PRACTICE_RID = :Rid"
+            : idKind == "CM2"
+                ? "AND d.CM2_DOCTOR_RID = :Rid"
+                : "AND t.REFERRING_DOCTOR = :Rid";
+
+        var resolved = await ResolveEntityAsync(isPractice, idKind, rid, ct);
+        if (resolved is null)
+            throw new KeyNotFoundException(isPractice ? "Practice not found." : "Doctor not found.");
+
+        var sql = $"""
+            SELECT
+                TO_CHAR(t.TEST_DATE, 'YYYY-MM') AS YearMonth,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '') AS InvestigationTypeCode,
+                NULLIF(TRIM(t.WARD), '') AS Ward,
+                CASE
+                    WHEN cp.CM2_PRACTICE_RID IS NOT NULL THEN
+                        NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NVL(NULLIF(TRIM(cp.PRAC_ALIAS), ''), 'Unnamed Practice'))
+                    ELSE NULL
+                END AS PracticeName,
+                COUNT(DISTINCT t.TEST_RID) AS StudyCount
+            FROM {Schema}.TEST t
+            LEFT JOIN {Schema}.DOCTOR d
+              ON d.DOCTOR_RID = t.REFERRING_DOCTOR
+            LEFT JOIN {Schema}.CM2_PRACTICE cp
+              ON cp.CM2_PRACTICE_RID = d.CM2_PRACTICE_RID
+            WHERE t.TEST_DATE >= :DateFrom
+              AND t.TEST_DATE < :DateToExclusive
+              {typeFilter}
+              {entityFilter}
+            GROUP BY
+                TO_CHAR(t.TEST_DATE, 'YYYY-MM'),
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), ''),
+                NULLIF(TRIM(t.WARD), ''),
+                CASE
+                    WHEN cp.CM2_PRACTICE_RID IS NOT NULL THEN
+                        NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NVL(NULLIF(TRIM(cp.PRAC_ALIAS), ''), 'Unnamed Practice'))
+                    ELSE NULL
+                END
+            """;
+
+        var rows = new List<(string YearMonth, string InvestigationType, string? Ward, string? PracticeName, int Count)>();
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = window.From.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = window.ToExclusive.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("Rid", OracleDbType.Decimal).Value = Convert.ToDecimal(rid);
+        if (!string.IsNullOrWhiteSpace(typeCode))
+            cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var yearMonth = reader.IsDBNull(0) ? null : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(yearMonth))
+                continue;
+            var rawType = reader.IsDBNull(1) ? null : reader.GetString(1);
+            var ward = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var practiceName = reader.IsDBNull(3) ? null : reader.GetString(3)?.Trim();
+            rows.Add((
+                yearMonth,
+                Cm2InvestigationTypeMapping.ResolveDisplayName(rawType),
+                ward,
+                string.IsNullOrWhiteSpace(practiceName) ? null : practiceName,
+                Convert.ToInt32(reader.GetValue(4))));
+        }
+
+        var byMonth = rows.ToLookup(r => r.YearMonth, StringComparer.Ordinal);
+        var months = window.Months
+            .Select(m =>
+            {
+                var monthRows = byMonth[m.YearMonth].ToList();
+                var testRows = monthRows
+                    .GroupBy(r => r.InvestigationType)
+                    .Select(tg =>
+                    {
+                        var total = tg.Sum(r => r.Count);
+                        var outpatient = tg.Where(r => WardClassification.IsCm2Outpatient(r.Ward)).Sum(r => r.Count);
+                        var inpatient = tg.Where(r => WardClassification.IsCm2Inpatient(r.Ward)).Sum(r => r.Count);
+                        return new ReferrerHistoryTestRow(tg.Key, total, outpatient, inpatient);
+                    })
+                    .OrderByDescending(t => t.Total)
+                    .ThenBy(t => t.InvestigationType)
+                    .ToList();
+
+                return new ReferrerHistoryMonthRow(
+                    m.YearMonth,
+                    m.Label,
+                    testRows.Sum(t => t.Total),
+                    testRows.Sum(t => t.Outpatient),
+                    testRows.Sum(t => t.Inpatient),
+                    testRows);
+            })
+            .ToList();
+
+        IReadOnlyList<string> combinedSites = isPractice
+            ? Array.Empty<string>()
+            : rows
+                .Select(r => r.PracticeName)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n)
+                .Cast<string>()
+                .ToList();
+
+        var grand = new CountTriple(
+            months.Sum(m => m.Total),
+            months.Sum(m => m.Outpatient),
+            months.Sum(m => m.Inpatient));
+
+        return new ReferrerHistoryReport(
+            modeKey,
+            entityId.Trim(),
+            resolved.Value.DisplayName,
+            resolved.Value.Suburb,
+            window.From,
+            window.ToExclusive.AddDays(-1),
+            combinedSites,
+            months,
+            grand,
+            string.IsNullOrWhiteSpace(typeCode)
+                ? null
+                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode));
+    }
+
+    private async Task<(string DisplayName, string? Suburb)?> ResolveEntityAsync(
+        bool isPractice, string idKind, string rid, CancellationToken ct)
+    {
+        string sql;
+        if (isPractice)
+        {
+            sql = $"""
+                SELECT
+                    NVL(NULLIF(TRIM(PRAC_NAME), ''), NVL(NULLIF(TRIM(PRAC_ALIAS), ''), 'Unnamed Practice')) AS DisplayName,
+                    NULLIF(TRIM(PRAC_SA_SUBURB), '') AS Suburb
+                FROM {Schema}.CM2_PRACTICE
+                WHERE CM2_PRACTICE_RID = :Rid
+                """;
+        }
+        else if (idKind == "CM2")
+        {
+            sql = $"""
+                SELECT
+                    TRIM(
+                        NVL(DOC_TITLE || ' ', '') ||
+                        NVL(DOC_FIRSTNAME || ' ', '') ||
+                        NVL(DOC_MIDDLENAME || ' ', '') ||
+                        NVL(DOC_LASTNAME, '')
+                    ) AS DisplayName,
+                    CAST(NULL AS VARCHAR2(1)) AS Suburb
+                FROM {Schema}.CM2_DOCTOR
+                WHERE CM2_DOCTOR_RID = :Rid
+                """;
+        }
+        else
+        {
+            sql = $"""
+                SELECT
+                    TRIM(
+                        NVL(DOCTOR_TITLE || ' ', '') ||
+                        NVL(DOCTOR_FIRSTNAME || ' ', '') ||
+                        NVL(DOCTOR_LASTNAME, '')
+                    ) AS DisplayName,
+                    NULLIF(TRIM(DOCTOR_SUBURB), '') AS Suburb
+                FROM {Schema}.DOCTOR
+                WHERE DOCTOR_RID = :Rid
+                """;
+        }
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("Rid", OracleDbType.Decimal).Value = Convert.ToDecimal(rid);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        var name = reader.IsDBNull(0) ? null : reader.GetString(0)?.Trim();
+        var suburb = reader.IsDBNull(1) ? null : reader.GetString(1)?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            name = isPractice ? "Unnamed Practice" : "Unknown";
+        return (name, string.IsNullOrWhiteSpace(suburb) ? null : suburb);
+    }
+
+    private static bool TryParseEntityId(string? id, out string kind, out string rid)
+    {
+        kind = "";
+        rid = "";
+        if (string.IsNullOrWhiteSpace(id))
+            return false;
+
+        var s = id.Trim();
+        string prefix;
+        if (s.StartsWith("CM2:", StringComparison.OrdinalIgnoreCase))
+            prefix = "CM2:";
+        else if (s.StartsWith("LEGACY:", StringComparison.OrdinalIgnoreCase))
+            prefix = "LEGACY:";
+        else
+            return false;
+
+        kind = prefix[..^1].ToUpperInvariant();
+        rid = s[prefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(rid) || rid is "0" or "1")
+            return false;
+        return decimal.TryParse(rid, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out _);
+    }
+
+    private static string? LikeContains(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return null;
+        var trimmed = query.Trim();
+        if (trimmed.Length < 2)
+            return null;
+        var escaped = trimmed
+            .Replace("!", "!!", StringComparison.Ordinal)
+            .Replace("%", "!%", StringComparison.Ordinal)
+            .Replace("_", "!_", StringComparison.Ordinal);
+        return "%" + escaped.ToUpperInvariant() + "%";
+    }
+
     private static string SiteSql(string? siteCode) =>
         string.IsNullOrWhiteSpace(siteCode) ? string.Empty : "AND t.SITE = :Site";
 

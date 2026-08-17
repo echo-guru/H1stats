@@ -36,7 +36,7 @@ export default function AdminHome() {
       <div className="flex items-center gap-3">
         <Settings className="h-8 w-8 text-brand-primary" />
         <div>
-          <h2 className="text-2xl font-semibold text-brand-accent">Administration</h2>
+          <h2 className="text-2xl font-semibold text-brand-accent">Settings</h2>
           <p className="text-sm text-gray-600">System configuration and user access</p>
         </div>
       </div>
