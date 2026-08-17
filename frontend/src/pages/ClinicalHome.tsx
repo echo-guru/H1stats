@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Stethoscope, ArrowRight, Users, Building2 } from 'lucide-react'
+import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 interface ClinicalAction {
@@ -33,6 +33,18 @@ const CLINICAL_ACTIONS: ClinicalAction[] = [
     description: 'Top referring practices, then doctors by provider number, then investigation types.',
     path: '/clinical/top-referring-practices-cm2',
     icon: Building2,
+  },
+  {
+    title: 'Referrers Growth by Quarter - CM2',
+    description: 'Rank referring doctors by growth versus the previous quarter.',
+    path: '/clinical/referrers-growth-cm2',
+    icon: TrendingUp,
+  },
+  {
+    title: 'Referrers Decline by Quarter - CM2',
+    description: 'Identify referring doctors whose referrals dropped versus the previous quarter.',
+    path: '/clinical/referrers-decline-cm2',
+    icon: TrendingDown,
   },
 ]
 

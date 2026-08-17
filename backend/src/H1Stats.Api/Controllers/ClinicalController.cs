@@ -131,6 +131,39 @@ public class ClinicalController : ControllerBase
         }
     }
 
+    [HttpGet("cm2/referrers-growth")]
+    public async Task<IActionResult> GetReferrersGrowth(
+        [FromQuery] int? year,
+        [FromQuery] int? quarter,
+        [FromQuery] int? top,
+        [FromQuery] string? investigationType,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? mode,
+        CancellationToken ct)
+    {
+        if (!QuarterPeriod.TryParse(year, quarter, out var current, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var topN = Cm2TopN.Clamp(top);
+            var report = await _cm2.GetReferrersGrowthByQuarterAsync(
+                current.Year, current.Quarter, topN, investigationType, sortBy, mode, ct);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/default-quarter")]
+    public IActionResult GetDefaultQuarter()
+    {
+        var q = QuarterPeriod.LastCompleted();
+        return Ok(new { year = q.Year, quarter = q.Quarter, label = q.Label });
+    }
+
     private static bool TryParseDateRange(
         string? dateFrom, string? dateTo, out DateOnly from, out DateOnly to, out string? error)
     {

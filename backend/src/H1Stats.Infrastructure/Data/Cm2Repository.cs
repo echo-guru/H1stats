@@ -574,5 +574,238 @@ public class Cm2Repository : ICm2Repository
 
         return new TopReferringPracticesReport(groups, grand, topN);
     }
+
+    public async Task<ReferrersGrowthReport> GetReferrersGrowthByQuarterAsync(
+        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, CancellationToken ct = default)
+    {
+        topN = Cm2TopN.Clamp(topN);
+        var declineMode = string.Equals(mode, "decline", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mode, "drop", StringComparison.OrdinalIgnoreCase);
+        var modeKey = declineMode ? "decline" : "growth";
+        var sortByPercent = string.Equals(sortBy, "percent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sortBy, "growthPercent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sortBy, "growth%", StringComparison.OrdinalIgnoreCase);
+        var sortKey = sortByPercent ? "percent" : "growth";
+        var current = QuarterPeriod.Of(year, quarter);
+        var previous = QuarterPeriod.Previous(year, quarter);
+        var typeCode = Cm2InvestigationTypeMapping.ResolveReferringDoctorCode(investigationType);
+        var typeFilter = string.IsNullOrWhiteSpace(typeCode)
+            ? "AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)"
+            : "AND t.TEST_REQUIRED = :InvestigationType";
+
+        var sql = $"""
+            SELECT
+                CASE
+                    WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END AS PersonId,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
+                END AS DisplayName,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '') AS InvestigationTypeCode,
+                COUNT(DISTINCT CASE
+                    WHEN t.TEST_DATE >= :PrevFrom AND t.TEST_DATE < :PrevToExclusive
+                    THEN t.TEST_RID END) AS PreviousTotal,
+                COUNT(DISTINCT CASE
+                    WHEN t.TEST_DATE >= :CurrFrom AND t.TEST_DATE < :CurrToExclusive
+                    THEN t.TEST_RID END) AS CurrentTotal
+            FROM {Schema}.TEST t
+            LEFT JOIN {Schema}.DOCTOR d
+              ON d.DOCTOR_RID = t.REFERRING_DOCTOR
+            LEFT JOIN {Schema}.CM2_DOCTOR cd
+              ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
+            WHERE t.TEST_DATE >= :PrevFrom
+              AND t.TEST_DATE < :CurrToExclusive
+              {typeFilter}
+            GROUP BY
+                CASE
+                    WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
+                END,
+                NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '')
+            """;
+
+        var raw = new List<(string PersonId, string DisplayName, string InvestigationType, int Previous, int Current)>();
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("PrevFrom", OracleDbType.Date).Value = previous.From.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("PrevToExclusive", OracleDbType.Date).Value = previous.ToExclusive.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("CurrFrom", OracleDbType.Date).Value = current.From.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("CurrToExclusive", OracleDbType.Date).Value = current.ToExclusive.ToDateTime(TimeOnly.MinValue);
+        if (!string.IsNullOrWhiteSpace(typeCode))
+            cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var personId = reader.IsDBNull(0) ? "UNKNOWN" : reader.GetString(0);
+            var displayName = reader.IsDBNull(1) ? null : reader.GetString(1)?.Trim();
+            if (string.IsNullOrWhiteSpace(displayName))
+                displayName = personId == "UNKNOWN" ? "Unknown" : personId;
+
+            var rawType = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var prev = Convert.ToInt32(reader.GetValue(3));
+            var curr = Convert.ToInt32(reader.GetValue(4));
+            if (prev == 0 && curr == 0)
+                continue;
+
+            raw.Add((
+                personId,
+                displayName,
+                Cm2InvestigationTypeMapping.ResolveDisplayName(rawType),
+                prev,
+                curr));
+        }
+
+        // Referrers from the selected (current) quarter, ranked by growth vs previous quarter.
+        var candidates = raw
+            .GroupBy(r => r.PersonId, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var displayName = g
+                    .Select(r => r.DisplayName)
+                    .Where(n => !string.IsNullOrWhiteSpace(n) && !n.StartsWith("CM2:", StringComparison.OrdinalIgnoreCase) && !n.StartsWith("LEGACY:", StringComparison.OrdinalIgnoreCase))
+                    .DefaultIfEmpty(g.First().DisplayName)
+                    .First();
+                var previousTotal = g.Sum(r => r.Previous);
+                var currentTotal = g.Sum(r => r.Current);
+                var growth = currentTotal - previousTotal;
+                decimal? pct = previousTotal > 0
+                    ? Math.Round((decimal)growth / previousTotal * 100m, 1)
+                    : null;
+                var percentSortKey = previousTotal == 0 && currentTotal > 0
+                    ? decimal.MaxValue
+                    : pct ?? decimal.MinValue;
+
+                var testRows = g
+                    .GroupBy(r => r.InvestigationType)
+                    .Select(tg =>
+                    {
+                        var prevT = tg.Sum(r => r.Previous);
+                        var currT = tg.Sum(r => r.Current);
+                        var gT = currT - prevT;
+                        decimal? pctT = prevT > 0
+                            ? Math.Round((decimal)gT / prevT * 100m, 1)
+                            : null;
+                        return new ReferrerGrowthTestRow(tg.Key, prevT, currT, gT, pctT);
+                    })
+                    .OrderBy(t => declineMode ? t.Growth : -t.Growth)
+                    .ThenByDescending(t => declineMode ? t.PreviousTotal : t.CurrentTotal)
+                    .ThenBy(t => t.InvestigationType)
+                    .ToList();
+
+                return new
+                {
+                    PersonId = g.Key,
+                    DisplayName = displayName,
+                    PreviousTotal = previousTotal,
+                    CurrentTotal = currentTotal,
+                    Growth = growth,
+                    GrowthPercent = pct,
+                    PercentSortKey = percentSortKey,
+                    TestRows = (IReadOnlyList<ReferrerGrowthTestRow>)testRows,
+                };
+            });
+
+        var filtered = declineMode
+            ? candidates.Where(r => r.PreviousTotal > 0 && r.Growth < 0)
+            : candidates.Where(r => r.CurrentTotal > 0);
+
+        var ordered = declineMode
+            ? (sortByPercent
+                ? filtered
+                    .OrderBy(r => r.GrowthPercent ?? 0m)
+                    .ThenBy(r => r.Growth)
+                    .ThenByDescending(r => r.PreviousTotal)
+                    .ThenBy(r => r.DisplayName)
+                : filtered
+                    .OrderBy(r => r.Growth)
+                    .ThenByDescending(r => r.PreviousTotal)
+                    .ThenBy(r => r.DisplayName))
+            : (sortByPercent
+                ? filtered
+                    .OrderByDescending(r => r.PercentSortKey)
+                    .ThenByDescending(r => r.Growth)
+                    .ThenByDescending(r => r.CurrentTotal)
+                    .ThenBy(r => r.DisplayName)
+                : filtered
+                    .OrderByDescending(r => r.Growth)
+                    .ThenByDescending(r => r.CurrentTotal)
+                    .ThenBy(r => r.DisplayName));
+
+        var rows = ordered
+            .Take(topN)
+            .Select((r, index) => new ReferrerGrowthRow(
+                index + 1,
+                r.PersonId,
+                r.DisplayName,
+                r.PreviousTotal,
+                r.CurrentTotal,
+                r.Growth,
+                r.GrowthPercent,
+                r.TestRows))
+            .ToList();
+
+        return new ReferrersGrowthReport(
+            current.Label,
+            previous.Label,
+            current.From,
+            current.ToExclusive.AddDays(-1),
+            previous.From,
+            previous.ToExclusive.AddDays(-1),
+            rows,
+            topN,
+            string.IsNullOrWhiteSpace(typeCode)
+                ? null
+                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode),
+            sortKey,
+            modeKey);
+    }
 }
 

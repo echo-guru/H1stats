@@ -64,7 +64,9 @@ Clinical
   ├── Reporting Dr - Syngo (Physician Statistics)
   ├── Reporting Dr - CM2
   ├── Top Referring Doctors - CM2
-  └── Top Referring Practices - CM2
+  ├── Top Referring Practices - CM2
+  ├── Referrers Growth by Quarter - CM2
+  └── Referrers Decline by Quarter - CM2
 Administration
   ├── Users
   ├── Roles
@@ -171,6 +173,38 @@ CSV.
 3. **Investigation type** for that provider — Total / Outpatient / Inpatient
 
 Resting ECG (`TEST_REQUIRED = 5`) is excluded, consistent with Top Referring Doctors.
+
+### Export
+
+CSV.
+
+## Clinical Module — Referrers Growth by Quarter (CM2)
+
+### Filters
+
+- Year / Quarter (default: last completed calendar quarter)
+- Investigation Type (default: All tests; Resting ECG excluded)
+- Top N (editable; default **50**)
+
+### Logic
+
+1. Take referring doctors (person grain) with activity in the **selected quarter**
+2. Compare totals to the **previous quarter**
+3. Rank by absolute growth (`current − previous`) descending; show growth % (or “New” when previous = 0)
+
+### Export
+
+CSV.
+
+## Clinical Module — Referrers Decline by Quarter (CM2)
+
+Same filters and expandable investigation-type breakdown as Referrers Growth.
+
+### Logic
+
+1. Take referring doctors with activity in the **previous quarter**
+2. Keep only those with a **negative** change in the selected quarter (includes drops to zero)
+3. Rank by largest absolute drop or largest % drop
 
 ### Export
 

@@ -37,6 +37,8 @@ public interface ICm2Repository
         DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, CancellationToken ct = default);
     Task<TopReferringPracticesReport> GetTopReferringPracticesAsync(
         DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default);
+    Task<ReferrersGrowthReport> GetReferrersGrowthByQuarterAsync(
+        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, CancellationToken ct = default);
 }
 
 public interface IDatabaseConnectionService

@@ -123,6 +123,39 @@ public record TopReferringPracticesReport(
     int TopN
 );
 
+public record ReferrerGrowthTestRow(
+    string InvestigationType,
+    int PreviousTotal,
+    int CurrentTotal,
+    int Growth,
+    decimal? GrowthPercent
+);
+
+public record ReferrerGrowthRow(
+    int Rank,
+    string PersonId,
+    string DisplayName,
+    int PreviousTotal,
+    int CurrentTotal,
+    int Growth,
+    decimal? GrowthPercent,
+    IReadOnlyList<ReferrerGrowthTestRow> TestRows
+);
+
+public record ReferrersGrowthReport(
+    string CurrentQuarterLabel,
+    string PreviousQuarterLabel,
+    DateOnly CurrentFrom,
+    DateOnly CurrentTo,
+    DateOnly PreviousFrom,
+    DateOnly PreviousTo,
+    IReadOnlyList<ReferrerGrowthRow> Rows,
+    int TopN,
+    string? InvestigationTypeFilter = null,
+    string SortBy = "growth",
+    string Mode = "growth"
+);
+
 public record ConnectionTestResult(bool Connected, string Message, DateTime? TestedAt = null);
 
 public record DatabaseConnectionTestResult(
