@@ -84,6 +84,7 @@ public class ClinicalController : ControllerBase
         [FromQuery] string? dateTo,
         [FromQuery] int? top,
         [FromQuery] string? investigationType,
+        [FromQuery] string? site,
         CancellationToken ct)
     {
         if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
@@ -92,7 +93,7 @@ public class ClinicalController : ControllerBase
         try
         {
             var topN = Cm2TopN.Clamp(top);
-            var report = await _cm2.GetTopReferringDoctorsAsync(from, to, topN, investigationType, ct);
+            var report = await _cm2.GetTopReferringDoctorsAsync(from, to, topN, investigationType, site, ct);
             return Ok(report);
         }
         catch (Exception ex)
@@ -109,11 +110,28 @@ public class ClinicalController : ControllerBase
         return Ok(list);
     }
 
+    [HttpGet("cm2/sites")]
+    public async Task<IActionResult> GetCm2Sites(CancellationToken ct)
+    {
+        try
+        {
+            var sites = await _cm2.GetSitesAsync(ct);
+            return Ok(sites.Select(s => new { id = s.Id, displayName = s.DisplayName }));
+        }
+        catch
+        {
+            var list = Cm2SiteMapping.All
+                .Select(x => new { id = x.Code, displayName = x.DisplayName });
+            return Ok(list);
+        }
+    }
+
     [HttpGet("cm2/top-referring-practices")]
     public async Task<IActionResult> GetTopReferringPractices(
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
         [FromQuery] int? top,
+        [FromQuery] string? site,
         CancellationToken ct)
     {
         if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
@@ -122,7 +140,7 @@ public class ClinicalController : ControllerBase
         try
         {
             var topN = Cm2TopN.Clamp(top);
-            var report = await _cm2.GetTopReferringPracticesAsync(from, to, topN, ct);
+            var report = await _cm2.GetTopReferringPracticesAsync(from, to, topN, site, ct);
             return Ok(report);
         }
         catch (Exception ex)
@@ -139,6 +157,7 @@ public class ClinicalController : ControllerBase
         [FromQuery] string? investigationType,
         [FromQuery] string? sortBy,
         [FromQuery] string? mode,
+        [FromQuery] string? site,
         CancellationToken ct)
     {
         if (!QuarterPeriod.TryParse(year, quarter, out var current, out var error))
@@ -148,7 +167,7 @@ public class ClinicalController : ControllerBase
         {
             var topN = Cm2TopN.Clamp(top);
             var report = await _cm2.GetReferrersGrowthByQuarterAsync(
-                current.Year, current.Quarter, topN, investigationType, sortBy, mode, ct);
+                current.Year, current.Quarter, topN, investigationType, sortBy, mode, site, ct);
             return Ok(report);
         }
         catch (Exception ex)

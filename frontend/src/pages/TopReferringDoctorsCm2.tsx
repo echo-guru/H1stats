@@ -24,9 +24,15 @@ interface ReportResult {
   grandTotal: { total: number; outpatient: number; inpatient: number }
   topN: number
   investigationTypeFilter?: string | null
+  siteFilter?: string | null
 }
 
 interface InvestigationTypeOption {
+  id: string
+  displayName: string
+}
+
+interface SiteOption {
   id: string
   displayName: string
 }
@@ -48,6 +54,8 @@ export default function TopReferringDoctorsCm2() {
   const [topN, setTopN] = useState(50)
   const [investigationType, setInvestigationType] = useState('')
   const [investigationTypes, setInvestigationTypes] = useState<InvestigationTypeOption[]>([])
+  const [site, setSite] = useState('')
+  const [sites, setSites] = useState<SiteOption[]>([])
   const [report, setReport] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -69,6 +77,22 @@ export default function TopReferringDoctorsCm2() {
         )
       })
       .catch(() => setInvestigationTypes([]))
+
+    fetch('/api/clinical/cm2/sites')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => {
+        if (!Array.isArray(list)) {
+          setSites([])
+          return
+        }
+        setSites(
+          list.map((item: { id: string; displayName: string }) => ({
+            id: String(item.id),
+            displayName: item.displayName,
+          }))
+        )
+      })
+      .catch(() => setSites([]))
   }, [])
 
   const runReport = async () => {
@@ -94,6 +118,7 @@ export default function TopReferringDoctorsCm2() {
         top: String(Math.min(500, Math.max(1, Math.floor(n)))),
       })
       if (investigationType) params.set('investigationType', investigationType)
+      if (site) params.set('site', site)
       const res = await fetch(`/api/clinical/cm2/top-referring-doctors?${params}`)
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -137,7 +162,10 @@ export default function TopReferringDoctorsCm2() {
     const typeSlug = report.investigationTypeFilter
       ? `-${report.investigationTypeFilter.replace(/\s+/g, '-').toLowerCase()}`
       : ''
-    a.download = `top-referring-doctors-cm2-${dateFrom}-${dateTo}-top${report.topN}${typeSlug}.csv`
+    const siteSlug = report.siteFilter
+      ? `-${report.siteFilter.replace(/\s+/g, '-').toLowerCase()}`
+      : ''
+    a.download = `top-referring-doctors-cm2-${dateFrom}-${dateTo}-top${report.topN}${typeSlug}${siteSlug}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -146,6 +174,10 @@ export default function TopReferringDoctorsCm2() {
     report?.investigationTypeFilter ||
     investigationTypes.find((t) => t.id === investigationType)?.displayName ||
     'all tests'
+  const selectedSiteLabel =
+    report?.siteFilter ||
+    sites.find((s) => s.id === site)?.displayName ||
+    'all sites'
 
   return (
     <div className="space-y-6">
@@ -160,7 +192,7 @@ export default function TopReferringDoctorsCm2() {
       </div>
 
       <div className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Date From</label>
             <input
@@ -178,6 +210,19 @@ export default function TopReferringDoctorsCm2() {
               onChange={(e) => setDateTo(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Site</label>
+            <select
+              value={site}
+              onChange={(e) => setSite(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary bg-white"
+            >
+              <option value="">All sites</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>{s.displayName}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Investigation Type</label>
@@ -222,7 +267,7 @@ export default function TopReferringDoctorsCm2() {
       {report && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            Showing top {report.topN} referring doctors for {selectedTypeLabel}
+            Showing top {report.topN} referring doctors for {selectedTypeLabel} at {selectedSiteLabel}
             ({report.groups.length} returned). Click a doctor to expand investigation types.
           </p>
           {report.groups.map((g) => {

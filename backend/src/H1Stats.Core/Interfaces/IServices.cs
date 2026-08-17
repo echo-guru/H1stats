@@ -33,12 +33,13 @@ public interface ICm2Repository
     Task<IReadOnlyList<CardiologistOption>> GetCardiologistsAsync(CancellationToken ct = default);
     Task<PhysicianStatisticsReport> GetReportingDrReportAsync(
         DateOnly dateFrom, DateOnly dateTo, string? cardiologist, CancellationToken ct = default);
+    Task<IReadOnlyList<SiteOption>> GetSitesAsync(CancellationToken ct = default);
     Task<TopReferringDoctorsReport> GetTopReferringDoctorsAsync(
-        DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, CancellationToken ct = default);
+        DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, string? site, CancellationToken ct = default);
     Task<TopReferringPracticesReport> GetTopReferringPracticesAsync(
-        DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default);
+        DateOnly dateFrom, DateOnly dateTo, int topN, string? site, CancellationToken ct = default);
     Task<ReferrersGrowthReport> GetReferrersGrowthByQuarterAsync(
-        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, CancellationToken ct = default);
+        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, string? site, CancellationToken ct = default);
 }
 
 public interface IDatabaseConnectionService

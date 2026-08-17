@@ -135,6 +135,7 @@ Grouped by Reporting Cardiologist → Investigation Type. Columns: Investigation
 ### Filters
 
 - Date From / Date To
+- Site (default: **All sites**; filters `TEST.SITE` → `SCHEDULE_SITE`: Greenslopes, Cleveland, Toowoomba)
 - Investigation Type (default: **All tests**; filters `TEST.TEST_REQUIRED`)
 - Top N (editable; default **50**; server clamp 1–500)
 
@@ -145,6 +146,7 @@ Grouped by Reporting Cardiologist → Investigation Type. Columns: Investigation
 | Study Date | `HEARTS1ST.TEST.TEST_DATE` |
 | Investigation Type | `TEST.TEST_REQUIRED` → semantic lookup |
 | Referring Doctor (person) | `TEST.REFERRING_DOCTOR` → `DOCTOR.DOCTOR_RID` → `CM2_DOCTOR` (fallback: unresolved legacy `DOCTOR_RID`) |
+| Site | `TEST.SITE` → `SCHEDULE_SITE.SCHEDULE_SITE_RID` (1 Greenslopes, 2 Cleveland, 3 Toowoomba). NULL = unassigned (included only when Site = All). |
 | Ward | `TEST.WARD` — `1` = Outpatient; `2`–`41` = Inpatient; else Unknown |
 
 ### Reporting Grain
@@ -164,6 +166,7 @@ CSV.
 ### Filters
 
 - Date From / Date To
+- Site (default: **All sites**; filters `TEST.SITE` → `SCHEDULE_SITE`)
 - Top N (editable; default **50**; server clamp 1–500)
 
 ### Hierarchy
@@ -183,6 +186,7 @@ CSV.
 ### Filters
 
 - Year / Quarter (default: last completed calendar quarter)
+- Site (default: All sites; filters `TEST.SITE` → `SCHEDULE_SITE`)
 - Investigation Type (default: All tests; Resting ECG excluded)
 - Top N (editable; default **50**)
 

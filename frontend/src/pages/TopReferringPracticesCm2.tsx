@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Building2, ChevronDown, ChevronRight, Download, Search } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
@@ -30,6 +30,12 @@ interface ReportResult {
   groups: PracticeGroup[]
   grandTotal: { total: number; outpatient: number; inpatient: number }
   topN: number
+  siteFilter?: string | null
+}
+
+interface SiteOption {
+  id: string
+  displayName: string
 }
 
 function toLocalDateInputValue(date = new Date()): string {
@@ -47,11 +53,31 @@ export default function TopReferringPracticesCm2() {
   })
   const [dateTo, setDateTo] = useState(() => toLocalDateInputValue())
   const [topN, setTopN] = useState(50)
+  const [site, setSite] = useState('')
+  const [sites, setSites] = useState<SiteOption[]>([])
   const [report, setReport] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [expandedPractices, setExpandedPractices] = useState<Record<string, boolean>>({})
   const [expandedDoctors, setExpandedDoctors] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    fetch('/api/clinical/cm2/sites')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => {
+        if (!Array.isArray(list)) {
+          setSites([])
+          return
+        }
+        setSites(
+          list.map((item: { id: string; displayName: string }) => ({
+            id: String(item.id),
+            displayName: item.displayName,
+          }))
+        )
+      })
+      .catch(() => setSites([]))
+  }, [])
 
   const runReport = async () => {
     const from = dateFrom.trim()
@@ -75,6 +101,7 @@ export default function TopReferringPracticesCm2() {
         dateTo: to,
         top: String(Math.min(500, Math.max(1, Math.floor(n)))),
       })
+      if (site) params.set('site', site)
       const res = await fetch(`/api/clinical/cm2/top-referring-practices?${params}`)
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -124,7 +151,10 @@ export default function TopReferringPracticesCm2() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `top-referring-practices-cm2-${dateFrom}-${dateTo}-top${report.topN}.csv`
+    const siteSlug = report.siteFilter
+      ? `-${report.siteFilter.replace(/\s+/g, '-').toLowerCase()}`
+      : ''
+    a.download = `top-referring-practices-cm2-${dateFrom}-${dateTo}-top${report.topN}${siteSlug}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -142,7 +172,7 @@ export default function TopReferringPracticesCm2() {
       </div>
 
       <div className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Date From</label>
             <input
@@ -160,6 +190,19 @@ export default function TopReferringPracticesCm2() {
               onChange={(e) => setDateTo(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Site</label>
+            <select
+              value={site}
+              onChange={(e) => setSite(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary bg-white"
+            >
+              <option value="">All sites</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>{s.displayName}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Top N</label>
@@ -191,7 +234,9 @@ export default function TopReferringPracticesCm2() {
       {report && (
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            Showing top {report.topN} referring practices ({report.groups.length} returned).
+            Showing top {report.topN} referring practices
+            {report.siteFilter ? ` at ${report.siteFilter}` : ' (all sites)'}
+            {' '}({report.groups.length} returned).
             Expand a practice to see referring doctors, then expand a doctor for investigation-type breakdown.
           </p>
 

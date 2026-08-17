@@ -182,6 +182,36 @@ ELSE Unknown
 ```
 
 Unknown (null, 0, outside 1–41) is included in Total but not in Outpatient or Inpatient, so Total may be greater than Outpatient + Inpatient.
+
+---
+
+## Site (`TEST.SITE` → `SCHEDULE_SITE`)
+
+Campus for a **completed study** is stored on `TEST.SITE`, which is `SCHEDULE_SITE.SCHEDULE_SITE_RID`.
+
+| `SCHEDULE_SITE_RID` | Site name | Common aliases |
+|---------------------|-----------|----------------|
+| 1 | Greenslopes | GSL |
+| 2 | Cleveland | CLEV |
+| 3 | Toowoomba | TWBA |
+| NULL | Unassigned (older studies) | — |
+
+```
+TEST.SITE = SCHEDULE_SITE.SCHEDULE_SITE_RID
+```
+
+Do **not** infer campus from `SCHEDULE_GROUP` or `SCHEDULE_OCC_SERVICE`. Those are the booking diary:
+
+```
+SCHEDULE_OCC_SERVICE.SCHEDULE_GROUP_RID → SCHEDULE_GROUP   (service family: Echo, Stress, Monitoring, …)
+SCHEDULE_ROOM.SCHEDULE_SITE_RID        → SCHEDULE_SITE    (diary rooms at a campus)
+SCHEDULE_NOTE.SCHEDULE_SITE_RID        → SCHEDULE_SITE    (diary notes at a campus)
+```
+
+`SCHEDULE_GROUP` is a service grouping (Echo / TEE / DCCS, Stress, Monitoring Attach, …), not Greenslopes / Cleveland / Toowoomba.
+
+When a referring-doctor report is filtered to one site, rank and counts include only studies with that `TEST.SITE`. Unassigned (`NULL`) studies appear only when Site = All.
+
 ---
 
 ## Development Rules
@@ -191,11 +221,11 @@ Unknown (null, 0, outside 1–41) is included in Total but not in Outpatient or 
 3. Count with `COUNT(DISTINCT TEST.TEST_RID)`.
 4. Keep referring-doctor and reporting-cardiologist dimensions separate.
 5. Do not merge ambiguous doctors without review.
-6. Add newly confirmed relationships here before using them in production reports.
+6. Use `TEST.SITE` (not `SCHEDULE_GROUP` / `SCHEDULE_OCC_SERVICE`) for campus on completed studies.
+7. Add newly confirmed relationships here before using them in production reports.
 
 ## Unresolved (do not invent)
 
 - Full identity-resolution admin (provider-key merge, manual mapping UI)
-- Broader site semantic model beyond ward codes (e.g. campus grouping)
 - Performing / supervising / ordering roles
 - `CALCULATIONS` / `CALCULATIONS_REPORT` detail

@@ -58,6 +58,47 @@ public class Cm2Repository : ICm2Repository
             .ToList();
     }
 
+    public async Task<IReadOnlyList<SiteOption>> GetSitesAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var sql = $"""
+                SELECT TRIM(TO_CHAR(SCHEDULE_SITE_RID)) AS Id,
+                       NULLIF(TRIM(SITE_NAME), '') AS DisplayName
+                FROM {Schema}.SCHEDULE_SITE
+                ORDER BY SITE_ORDER, SITE_NAME
+                """;
+
+            var list = new List<SiteOption>();
+            await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var id = reader.IsDBNull(0) ? null : reader.GetString(0);
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+                var name = reader.IsDBNull(1) ? null : reader.GetString(1);
+                list.Add(new SiteOption(id, string.IsNullOrWhiteSpace(name)
+                    ? Cm2SiteMapping.ResolveDisplayName(id)
+                    : name.Trim()));
+            }
+
+            if (list.Count > 0)
+                return list;
+        }
+        catch
+        {
+            // Fall through to curated campus list.
+        }
+
+        return Cm2SiteMapping.All
+            .Select(x => new SiteOption(x.Code, x.DisplayName))
+            .ToList();
+    }
+
     public async Task<PhysicianStatisticsReport> GetReportingDrReportAsync(
         DateOnly dateFrom, DateOnly dateTo, string? cardiologist, CancellationToken ct = default)
     {
@@ -151,13 +192,15 @@ public class Cm2Repository : ICm2Repository
     }
 
     public async Task<TopReferringDoctorsReport> GetTopReferringDoctorsAsync(
-        DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, CancellationToken ct = default)
+        DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, string? site, CancellationToken ct = default)
     {
         topN = Cm2TopN.Clamp(topN);
         var typeCode = Cm2InvestigationTypeMapping.ResolveReferringDoctorCode(investigationType);
         var typeFilter = string.IsNullOrWhiteSpace(typeCode)
             ? "AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)"
             : "AND t.TEST_REQUIRED = :InvestigationType";
+        var siteCode = Cm2SiteMapping.ResolveCode(site);
+        var siteFilter = SiteSql(siteCode);
 
         var sql = $"""
             SELECT
@@ -199,6 +242,7 @@ public class Cm2Repository : ICm2Repository
             WHERE t.TEST_DATE >= :DateFrom
               AND t.TEST_DATE < :DateToExclusive
               {typeFilter}
+              {siteFilter}
             GROUP BY
                 CASE
                     WHEN d.CM2_DOCTOR_RID IS NOT NULL
@@ -241,6 +285,7 @@ public class Cm2Repository : ICm2Repository
         cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
         if (!string.IsNullOrWhiteSpace(typeCode))
             cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
+        AddSiteParameter(cmd, siteCode);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -313,13 +358,18 @@ public class Cm2Repository : ICm2Repository
             topN,
             string.IsNullOrWhiteSpace(typeCode)
                 ? null
-                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode));
+                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode),
+            string.IsNullOrWhiteSpace(siteCode)
+                ? null
+                : Cm2SiteMapping.ResolveDisplayName(siteCode));
     }
 
     public async Task<TopReferringPracticesReport> GetTopReferringPracticesAsync(
-        DateOnly dateFrom, DateOnly dateTo, int topN, CancellationToken ct = default)
+        DateOnly dateFrom, DateOnly dateTo, int topN, string? site, CancellationToken ct = default)
     {
         topN = Cm2TopN.Clamp(topN);
+        var siteCode = Cm2SiteMapping.ResolveCode(site);
+        var siteFilter = SiteSql(siteCode);
         const string validProviderRegex = "^[0-9]{6}[0-9A-Z]{2}$";
 
         // Practice → provider number (referring Dr at location) → investigation type.
@@ -389,6 +439,7 @@ public class Cm2Repository : ICm2Repository
             WHERE t.TEST_DATE >= :DateFrom
               AND t.TEST_DATE < :DateToExclusive
               AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)
+              {siteFilter}
             GROUP BY
                 CASE
                     WHEN d.CM2_PRACTICE_RID IS NOT NULL
@@ -456,6 +507,7 @@ public class Cm2Repository : ICm2Repository
         cmd.CommandText = sql;
         cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom.ToDateTime(TimeOnly.MinValue);
         cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        AddSiteParameter(cmd, siteCode);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -572,11 +624,17 @@ public class Cm2Repository : ICm2Repository
             groups.Sum(g => g.Subtotal.Outpatient),
             groups.Sum(g => g.Subtotal.Inpatient));
 
-        return new TopReferringPracticesReport(groups, grand, topN);
+        return new TopReferringPracticesReport(
+            groups,
+            grand,
+            topN,
+            string.IsNullOrWhiteSpace(siteCode)
+                ? null
+                : Cm2SiteMapping.ResolveDisplayName(siteCode));
     }
 
     public async Task<ReferrersGrowthReport> GetReferrersGrowthByQuarterAsync(
-        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, CancellationToken ct = default)
+        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, string? site, CancellationToken ct = default)
     {
         topN = Cm2TopN.Clamp(topN);
         var declineMode = string.Equals(mode, "decline", StringComparison.OrdinalIgnoreCase)
@@ -592,6 +650,8 @@ public class Cm2Repository : ICm2Repository
         var typeFilter = string.IsNullOrWhiteSpace(typeCode)
             ? "AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)"
             : "AND t.TEST_REQUIRED = :InvestigationType";
+        var siteCode = Cm2SiteMapping.ResolveCode(site);
+        var siteFilter = SiteSql(siteCode);
 
         var sql = $"""
             SELECT
@@ -637,6 +697,7 @@ public class Cm2Repository : ICm2Repository
             WHERE t.TEST_DATE >= :PrevFrom
               AND t.TEST_DATE < :CurrToExclusive
               {typeFilter}
+              {siteFilter}
             GROUP BY
                 CASE
                     WHEN d.CM2_DOCTOR_RID IS NOT NULL
@@ -680,6 +741,7 @@ public class Cm2Repository : ICm2Repository
         cmd.Parameters.Add("CurrToExclusive", OracleDbType.Date).Value = current.ToExclusive.ToDateTime(TimeOnly.MinValue);
         if (!string.IsNullOrWhiteSpace(typeCode))
             cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
+        AddSiteParameter(cmd, siteCode);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -805,7 +867,19 @@ public class Cm2Repository : ICm2Repository
                 ? null
                 : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode),
             sortKey,
-            modeKey);
+            modeKey,
+            string.IsNullOrWhiteSpace(siteCode)
+                ? null
+                : Cm2SiteMapping.ResolveDisplayName(siteCode));
+    }
+
+    private static string SiteSql(string? siteCode) =>
+        string.IsNullOrWhiteSpace(siteCode) ? string.Empty : "AND t.SITE = :Site";
+
+    private static void AddSiteParameter(OracleCommand cmd, string? siteCode)
+    {
+        if (!string.IsNullOrWhiteSpace(siteCode))
+            cmd.Parameters.Add("Site", OracleDbType.Decimal).Value = Convert.ToDecimal(siteCode);
     }
 }
 

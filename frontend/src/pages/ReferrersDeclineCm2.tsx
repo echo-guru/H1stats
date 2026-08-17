@@ -32,9 +32,15 @@ interface ReportResult {
   topN: number
   investigationTypeFilter?: string | null
   sortBy?: string
+  siteFilter?: string | null
 }
 
 interface InvestigationTypeOption {
+  id: string
+  displayName: string
+}
+
+interface SiteOption {
   id: string
   displayName: string
 }
@@ -77,6 +83,8 @@ export default function ReferrersDeclineCm2() {
   const [sortBy, setSortBy] = useState<'growth' | 'percent'>('growth')
   const [investigationType, setInvestigationType] = useState('')
   const [investigationTypes, setInvestigationTypes] = useState<InvestigationTypeOption[]>([])
+  const [site, setSite] = useState('')
+  const [sites, setSites] = useState<SiteOption[]>([])
   const [report, setReport] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -98,6 +106,22 @@ export default function ReferrersDeclineCm2() {
         )
       })
       .catch(() => setInvestigationTypes([]))
+
+    fetch('/api/clinical/cm2/sites')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => {
+        if (!Array.isArray(list)) {
+          setSites([])
+          return
+        }
+        setSites(
+          list.map((item: { id: string; displayName: string }) => ({
+            id: String(item.id),
+            displayName: item.displayName,
+          }))
+        )
+      })
+      .catch(() => setSites([]))
   }, [])
 
   const runReport = async () => {
@@ -122,6 +146,7 @@ export default function ReferrersDeclineCm2() {
         mode: 'decline',
       })
       if (investigationType) params.set('investigationType', investigationType)
+      if (site) params.set('site', site)
       const res = await fetch(`/api/clinical/cm2/referrers-growth?${params}`)
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -173,7 +198,10 @@ export default function ReferrersDeclineCm2() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `referrers-decline-cm2-${report.currentQuarterLabel.replace(/\s+/g, '-')}-top${report.topN}.csv`
+    const siteSlug = report.siteFilter
+      ? `-${report.siteFilter.replace(/\s+/g, '-').toLowerCase()}`
+      : ''
+    a.download = `referrers-decline-cm2-${report.currentQuarterLabel.replace(/\s+/g, '-')}-top${report.topN}${siteSlug}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -193,7 +221,7 @@ export default function ReferrersDeclineCm2() {
       </div>
 
       <div className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Year</label>
             <select
@@ -217,6 +245,19 @@ export default function ReferrersDeclineCm2() {
               <option value={2}>Q2 (Apr–Jun)</option>
               <option value={3}>Q3 (Jul–Sep)</option>
               <option value={4}>Q4 (Oct–Dec)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Site</label>
+            <select
+              value={site}
+              onChange={(e) => setSite(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary bg-white"
+            >
+              <option value="">All sites</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>{s.displayName}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -277,8 +318,9 @@ export default function ReferrersDeclineCm2() {
             {' '}({report.currentFrom} – {report.currentTo}) vs{' '}
             <strong>{report.previousQuarterLabel}</strong>
             {' '}({report.previousFrom} – {report.previousTo})
-            {report.investigationTypeFilter ? ` · ${report.investigationTypeFilter}` : ''}.
-            Only doctors with prior-quarter referrals and a negative change are shown.
+            {report.investigationTypeFilter ? ` · ${report.investigationTypeFilter}` : ''}
+            {report.siteFilter ? ` · ${report.siteFilter}` : ' · all sites'}
+            . Only doctors with prior-quarter referrals and a negative change are shown.
             Sorted by {report.sortBy === 'percent' ? 'largest % drop' : 'largest absolute drop'}.
             Click a doctor to expand investigation types.
           </p>

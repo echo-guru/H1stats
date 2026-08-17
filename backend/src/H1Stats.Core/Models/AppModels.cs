@@ -33,6 +33,8 @@ public record UpdateUserRequest(string? Password, bool? IsAdmin);
 
 public record CardiologistOption(string Id, string DisplayName);
 
+public record SiteOption(string Id, string DisplayName);
+
 public record DashboardSummary(
     int StudiesToday,
     int StudiesThisWeek,
@@ -90,7 +92,8 @@ public record TopReferringDoctorsReport(
     IReadOnlyList<ReferringDoctorGroup> Groups,
     CountTriple GrandTotal,
     int TopN,
-    string? InvestigationTypeFilter = null
+    string? InvestigationTypeFilter = null,
+    string? SiteFilter = null
 );
 
 public record ReferringPracticeTestRow(
@@ -120,7 +123,8 @@ public record ReferringPracticeGroup(
 public record TopReferringPracticesReport(
     IReadOnlyList<ReferringPracticeGroup> Groups,
     CountTriple GrandTotal,
-    int TopN
+    int TopN,
+    string? SiteFilter = null
 );
 
 public record ReferrerGrowthTestRow(
@@ -153,7 +157,8 @@ public record ReferrersGrowthReport(
     int TopN,
     string? InvestigationTypeFilter = null,
     string SortBy = "growth",
-    string Mode = "growth"
+    string Mode = "growth",
+    string? SiteFilter = null
 );
 
 public record ConnectionTestResult(bool Connected, string Message, DateTime? TestedAt = null);
