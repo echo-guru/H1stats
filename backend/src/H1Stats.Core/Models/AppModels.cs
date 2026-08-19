@@ -180,6 +180,24 @@ public record ReferrerHistoryMonthRow(
     int Inpatient,
     IReadOnlyList<ReferrerHistoryTestRow> TestRows);
 
+public record DrSummaryColumn(string Id, string Initials, string DisplayName);
+
+public record DrSummaryRow(
+    string Key,
+    string Label,
+    string Kind,
+    IReadOnlyList<int> Counts);
+
+public record DrSummaryReport(
+    int Year,
+    int Month,
+    string Label,
+    DateOnly DateFrom,
+    DateOnly DateToExclusive,
+    IReadOnlyList<DrSummaryColumn> Columns,
+    IReadOnlyList<DrSummaryRow> Rows,
+    int UnassignedDccs = 0);
+
 public record ReferrerHistoryReport(
     string Mode,
     string EntityId,

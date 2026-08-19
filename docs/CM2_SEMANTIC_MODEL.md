@@ -57,6 +57,9 @@ REPORTS.TEST_RID = TEST.TEST_RID          (optional; left join)
 - Resting ECG (`TEST_REQUIRED = 5`): no `REPORTS`, no modality child — count from `TEST`.
 - Seven-Day Event Monitor (`= 8`): has `REPORTS`, no modality child — count from `TEST`.
 - `CONSULT` has no `TEST_RID` — do not join as a study child.
+- Consult reporting date is `LETTERS.LETTER_DATE` via `CONSULT.LETTERS_RID`.
+- Consult reporting cardiologist is `CONSULT.USER_LIST_RID` (same ID space as `TEST.CARDIOLOGIST1`).
+- Intra-operative TEE (IOE) is `TEST_REQUIRED = 4` with theatre ward (`WARD` 20 or 24).
 
 ---
 
@@ -73,6 +76,7 @@ Source: `TEST.CARDIOLOGIST1` — **not** a `DOCTOR_RID`. Curated lookup only.
 | 2901 | Dr Shi Yi Goo |
 | 144 | Dr Roess D Pascoe |
 | 981 | Dr Jeremy Wright |
+| 3581 | Dr Roland Hilling-Smith |
 
 Never join `CARDIOLOGIST1` directly to `DOCTOR.DOCTOR_RID`.
 

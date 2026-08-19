@@ -45,6 +45,9 @@ public interface ICm2Repository
     Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringPracticesAsync(string query, CancellationToken ct = default);
     Task<ReferrerHistoryReport> GetReferrerHistoryAsync(
         string mode, string entityId, string? investigationType, CancellationToken ct = default);
+    Task<DrSummaryReport> GetDrSummaryAsync(int year, int month, CancellationToken ct = default);
+    Task<DrSummaryReport> GetDrSummaryHistoryAsync(
+        string cardiologistId, int year, int month, CancellationToken ct = default);
 }
 
 public interface IDatabaseConnectionService

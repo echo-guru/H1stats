@@ -240,6 +240,53 @@ public class ClinicalController : ControllerBase
         }
     }
 
+    [HttpGet("cm2/dr-summary")]
+    public async Task<IActionResult> GetDrSummary(
+        [FromQuery] int? year,
+        [FromQuery] int? month,
+        CancellationToken ct)
+    {
+        if (!MonthPeriod.TryParse(year, month, out var period, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var report = await _cm2.GetDrSummaryAsync(period.Year, period.Month, ct);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/dr-summary/history")]
+    public async Task<IActionResult> GetDrSummaryHistory(
+        [FromQuery] string? physician,
+        [FromQuery] int? year,
+        [FromQuery] int? month,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(physician))
+            return BadRequest(new { message = "physician is required" });
+        if (!MonthPeriod.TryParse(year, month, out var period, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var report = await _cm2.GetDrSummaryHistoryAsync(physician, period.Year, period.Month, ct);
+            return Ok(report);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     private static bool TryParseDateRange(
         string? dateFrom, string? dateTo, out DateOnly from, out DateOnly to, out string? error)
     {

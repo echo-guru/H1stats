@@ -63,6 +63,7 @@ Dashboard
 Clinical
   ├── Reporting Dr - Syngo (Physician Statistics)
   ├── Reporting Dr - CM2
+  ├── Dr Summary - CM2
   ├── Top Referring Doctors - CM2
   ├── Top Referring Practices - CM2
   ├── Referrers Growth by Quarter - CM2
@@ -130,6 +131,32 @@ Excel, CSV. PDF planned.
 Grouped by Reporting Cardiologist → Investigation Type. Columns: Investigation Type, Total, Outpatient, Inpatient.
 
 **Scope (current):** Imaging investigations only — `TEST_REQUIRED` in (1, 2, 3, 4): Transthoracic Echo, Exercise Stress Echo, Dobutamine Stress Echo, Transoesophageal Echo. ECG / Holter / event / BP are excluded.
+
+## Clinical Module — Dr Summary (CM2)
+
+Monthly matrix of reporting activity. Columns are cardiologist initials (JC, SYG, VM, JM, RDP, JW; extra doctors with activity are appended, excluding RHS and 1761). Rows are occasions of service.
+
+### Filters
+
+- Month (calendar month; default current)
+
+### OOS mapping (study requested)
+
+| OOS row | Source |
+|---------|--------|
+| Echo / Echo - InPt / Echo - Total | `TEST.TEST_REQUIRED = 1` (Transthoracic Echo). Unlabelled Echo row = outpatient (`WARD = 1`); InPt = inpatient (`WARD` 2–41). |
+| DSE / DSE - InPt / DSE - Total | `TEST.TEST_REQUIRED = 3` (Dobutamine Stress Echo), same IP/OP split |
+| SE / SE - InPt / SE - Total | `TEST.TEST_REQUIRED = 2` (Exercise Stress Echo), same IP/OP split |
+| IOE | `TEST.TEST_REQUIRED = 4` and theatre ward (`WARD` 20 Theatre 8, 24 Theatre Admissions) |
+| TEE | Remaining `TEST.TEST_REQUIRED = 4` |
+| TEE - Total | All `TEST.TEST_REQUIRED = 4` (IOE + TEE) |
+| Imaging subtotal | Echo-Total + DSE-Total + SE-Total + TEE-Total |
+| DCCS | Diary cardioversion: `SCHEDULE_OCC_SERVICE` 6 (DCCS only) and 101 (TEE/DCCS). Cardiologist from a same-day `TEST` for that patient when present. |
+| Consults | `CONSULT` joined to `LETTERS` on `LETTERS_RID`; date = `LETTER_DATE`; doctor = `CONSULT.USER_LIST_RID`. All consult types combined (initial, follow-up, and derivatives). |
+
+ECG is excluded. Study date for imaging: `TEST.TEST_DATE`. Reporting cardiologist: `TEST.CARDIOLOGIST1`. Dr Roland Hilling-Smith (RHS) and cardiologist 1761 are omitted from this matrix.
+
+Click a cardiologist to open the same OOS rows for that doctor across the prior 12 months (relative to the selected month).
 
 ## Clinical Module — Top Referring Doctors (CM2)
 

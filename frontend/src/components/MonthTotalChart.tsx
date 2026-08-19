@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 interface MonthPoint {
   yearMonth: string
   label: string
@@ -6,6 +8,11 @@ interface MonthPoint {
 
 interface MonthTotalChartProps {
   months: MonthPoint[]
+  title?: string
+  yAxisLabel?: string
+  compact?: boolean
+  framed?: boolean
+  variant?: 'bar' | 'line'
 }
 
 function niceMax(value: number): number {
@@ -25,10 +32,20 @@ function shortMonthLabel(label: string): { month: string; year: string } {
   }
 }
 
-export function MonthTotalChart({ months }: MonthTotalChartProps) {
+export function MonthTotalChart({
+  months,
+  title = 'Referrals by month',
+  yAxisLabel = 'Total',
+  compact = false,
+  framed = true,
+  variant = 'bar',
+}: MonthTotalChartProps) {
+  const gradId = `trend-fill-${useId().replace(/:/g, '')}`
   const width = 760
-  const height = 300
-  const pad = { top: 28, right: 20, bottom: 52, left: 52 }
+  const height = compact ? 216 : 300
+  const pad = compact
+    ? { top: 22, right: 16, bottom: 44, left: 44 }
+    : { top: 28, right: 20, bottom: 52, left: 52 }
   const innerW = width - pad.left - pad.right
   const innerH = height - pad.top - pad.bottom
   const maxY = niceMax(Math.max(0, ...months.map((m) => m.total)))
@@ -36,26 +53,42 @@ export function MonthTotalChart({ months }: MonthTotalChartProps) {
   const ticks = Array.from({ length: tickCount + 1 }, (_, i) => (maxY / tickCount) * i)
   const slot = months.length > 0 ? innerW / months.length : innerW
   const barW = Math.min(36, slot * 0.55)
+  const points = months.map((m, i) => {
+    const x = pad.left + slot * i + slot / 2
+    const y = pad.top + innerH - (maxY > 0 ? (m.total / maxY) * innerH : 0)
+    return { x, y, m }
+  })
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
+  const areaPath =
+    points.length === 0
+      ? ''
+      : `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${pad.top + innerH} L ${points[0].x.toFixed(1)} ${pad.top + innerH} Z`
 
-  return (
-    <div className="bg-white rounded-lg border border-brand-primary-border p-4">
-      <p className="text-sm font-medium text-brand-primary mb-2">Referrals by month</p>
+  const chart = (
+    <>
+      {title ? <p className={`font-medium text-brand-primary ${compact ? 'text-xs mb-1' : 'text-sm mb-2'}`}>{title}</p> : null}
       <div className="overflow-x-auto">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full min-w-[640px] h-auto"
+          className={`w-full h-auto ${compact ? 'min-w-[520px]' : 'min-w-[640px]'}`}
           role="img"
-          aria-label="Total referrals for each of the past 12 months"
+          aria-label={title || 'Monthly totals'}
         >
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#33758F" stopOpacity="0.28" />
+              <stop offset="100%" stopColor="#33758F" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
           <text
-            x={14}
+            x={compact ? 12 : 14}
             y={pad.top + innerH / 2}
             textAnchor="middle"
             fill="#33758F"
-            fontSize="12"
-            transform={`rotate(-90 14 ${pad.top + innerH / 2})`}
+            fontSize={compact ? '11' : '12'}
+            transform={`rotate(-90 ${compact ? 12 : 14} ${pad.top + innerH / 2})`}
           >
-            Total
+            {yAxisLabel}
           </text>
 
           {ticks.map((tick) => {
@@ -70,53 +103,98 @@ export function MonthTotalChart({ months }: MonthTotalChartProps) {
                   stroke={tick === 0 ? '#a8c9d9' : '#e8f1f5'}
                   strokeWidth={tick === 0 ? 1.5 : 1}
                 />
-                <text x={pad.left - 8} y={y + 4} textAnchor="end" fill="#6b7280" fontSize="11">
+                <text x={pad.left - 8} y={y + 4} textAnchor="end" fill="#6b7280" fontSize={compact ? '10' : '11'}>
                   {tick.toLocaleString()}
                 </text>
               </g>
             )
           })}
 
-          {months.map((m, i) => {
-            const x = pad.left + slot * i + (slot - barW) / 2
-            const h = maxY > 0 ? (m.total / maxY) * innerH : 0
-            const y = pad.top + innerH - h
-            const { month, year } = shortMonthLabel(m.label)
-            const cx = x + barW / 2
-            return (
-              <g key={m.yearMonth}>
-                <title>{`${m.label}: ${m.total.toLocaleString()}`}</title>
-                <rect
-                  x={x}
-                  y={y}
-                  width={barW}
-                  height={Math.max(h, m.total > 0 ? 2 : 0)}
-                  rx={3}
-                  fill="#33758F"
-                />
-                {m.total > 0 && (
-                  <text
-                    x={cx}
-                    y={y - 6}
-                    textAnchor="middle"
-                    fill="#33758F"
-                    fontSize="11"
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    {m.total.toLocaleString()}
-                  </text>
-                )}
-                <text x={cx} y={height - 28} textAnchor="middle" fill="#374151" fontSize="11">
-                  {month}
-                </text>
-                <text x={cx} y={height - 14} textAnchor="middle" fill="#6b7280" fontSize="10">
-                  {year}
-                </text>
-              </g>
-            )
-          })}
+          {variant === 'line' && points.length > 0 && (
+            <>
+              <path d={areaPath} fill={`url(#${gradId})`} />
+              <path
+                d={linePath}
+                fill="none"
+                stroke="#33758F"
+                strokeWidth={2.4}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            </>
+          )}
+
+          {variant === 'bar'
+            ? months.map((m, i) => {
+                const x = pad.left + slot * i + (slot - barW) / 2
+                const h = maxY > 0 ? (m.total / maxY) * innerH : 0
+                const y = pad.top + innerH - h
+                const { month, year } = shortMonthLabel(m.label)
+                const cx = x + barW / 2
+                return (
+                  <g key={m.yearMonth}>
+                    <title>{`${m.label}: ${m.total.toLocaleString()}`}</title>
+                    <rect
+                      x={x}
+                      y={y}
+                      width={barW}
+                      height={Math.max(h, m.total > 0 ? 2 : 0)}
+                      rx={3}
+                      fill="#33758F"
+                    />
+                    {m.total > 0 && (
+                      <text
+                        x={cx}
+                        y={y - 6}
+                        textAnchor="middle"
+                        fill="#33758F"
+                        fontSize="11"
+                        fontFamily="ui-monospace, monospace"
+                      >
+                        {m.total.toLocaleString()}
+                      </text>
+                    )}
+                    <text x={cx} y={height - 28} textAnchor="middle" fill="#374151" fontSize="11">
+                      {month}
+                    </text>
+                    <text x={cx} y={height - 14} textAnchor="middle" fill="#6b7280" fontSize="10">
+                      {year}
+                    </text>
+                  </g>
+                )
+              })
+            : points.map((p) => {
+                const { month, year } = shortMonthLabel(p.m.label)
+                return (
+                  <g key={p.m.yearMonth}>
+                    <title>{`${p.m.label}: ${p.m.total.toLocaleString()}`}</title>
+                    <circle cx={p.x} cy={p.y} r={4.2} fill="#fff" stroke="#33758F" strokeWidth={2} />
+                    {p.m.total > 0 && (
+                      <text
+                        x={p.x}
+                        y={p.y - 10}
+                        textAnchor="middle"
+                        fill="#33758F"
+                        fontSize={compact ? '10' : '11'}
+                        fontFamily="ui-monospace, monospace"
+                      >
+                        {p.m.total.toLocaleString()}
+                      </text>
+                    )}
+                    <text x={p.x} y={height - 26} textAnchor="middle" fill="#374151" fontSize={compact ? '10' : '11'}>
+                      {month}
+                    </text>
+                    <text x={p.x} y={height - 12} textAnchor="middle" fill="#6b7280" fontSize="10">
+                      {year}
+                    </text>
+                  </g>
+                )
+              })}
         </svg>
       </div>
-    </div>
+    </>
   )
+
+  if (!framed) return <div>{chart}</div>
+  return <div className="bg-white rounded-lg border border-brand-primary-border p-4">{chart}</div>
 }

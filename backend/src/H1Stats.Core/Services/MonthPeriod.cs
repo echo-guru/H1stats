@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace H1Stats.Core.Services;
 
-/// <summary>Calendar-month helpers for rolling 12-month referrer history.</summary>
+/// <summary>Calendar-month helpers for referrer history and Dr Summary.</summary>
 public static class MonthPeriod
 {
     public const int MonthCount = 12;
@@ -37,5 +37,52 @@ public static class MonthPeriod
         }
 
         return (from, toExclusive, months);
+    }
+
+    public static (int Year, int Month, DateOnly From, DateOnly ToExclusive, string Label) Of(int year, int month)
+    {
+        if (month is < 1 or > 12)
+            throw new ArgumentOutOfRangeException(nameof(month), "Month must be 1–12.");
+
+        var from = new DateOnly(year, month, 1);
+        var toExclusive = from.AddMonths(1);
+        var label = from.ToString("MMMM yyyy", CultureInfo.GetCultureInfo("en-AU"));
+        return (year, month, from, toExclusive, label);
+    }
+
+    public static (int Year, int Month, DateOnly From, DateOnly ToExclusive, string Label) Current(
+        DateOnly? asOf = null)
+    {
+        var today = asOf ?? DateOnly.FromDateTime(DateTime.Today);
+        return Of(today.Year, today.Month);
+    }
+
+    public static bool TryParse(int? year, int? month,
+        out (int Year, int Month, DateOnly From, DateOnly ToExclusive, string Label) current,
+        out string? error)
+    {
+        error = null;
+        if (year is null && month is null)
+        {
+            current = Current();
+            return true;
+        }
+
+        if (year is null or < 2000 or > 2100)
+        {
+            current = default;
+            error = "Invalid or missing year";
+            return false;
+        }
+
+        if (month is null or < 1 or > 12)
+        {
+            current = default;
+            error = "Invalid or missing month (1–12)";
+            return false;
+        }
+
+        current = Of(year.Value, month.Value);
+        return true;
     }
 }

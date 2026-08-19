@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange } from 'lucide-react'
+import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange, ClipboardList } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 interface ClinicalAction {
@@ -21,6 +21,12 @@ const REPORTING_DR_ACTIONS: ClinicalAction[] = [
     description: 'Cardiologist reporting activity from Oracle CM2 (Hearts1st.TEST).',
     path: '/clinical/reporting-dr-cm2',
     icon: Stethoscope,
+  },
+  {
+    title: 'Dr Summary - CM2',
+    description: 'Monthly OOS matrix by reporting cardiologist (Echo, DSE, SE, TEE, DCCS, Consults).',
+    path: '/clinical/dr-summary-cm2',
+    icon: ClipboardList,
   },
 ]
 

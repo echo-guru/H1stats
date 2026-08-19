@@ -13,9 +13,14 @@ public static class Cm2CardiologistMapping
         ["282"] = ("Dr Julie Ch'ng", "JC"),
         ["1941"] = ("Dr Justin Morze", "JM"),
         ["144"] = ("Dr Roess Pascoe", "RDP"),
+        ["3581"] = ("Dr Roland Hilling-Smith", "RHS"),
         ["2901"] = ("Dr Shi Yi Goo", "SYG"),
         ["1681"] = ("Dr Vance Manins", "VM"),
     };
+
+    /// <summary>Column order for Dr Summary (reporting panel).</summary>
+    public static readonly IReadOnlyList<string> SummaryColumnIds =
+        ["282", "2901", "1681", "1941", "144", "981"];
 
     private static readonly Dictionary<string, string> IdByDisplayName =
         ById.ToDictionary(kvp => kvp.Value.DisplayName, kvp => kvp.Key, StringComparer.OrdinalIgnoreCase);
@@ -42,6 +47,19 @@ public static class Cm2CardiologistMapping
         var key = NormalizeId(raw);
         return ById.TryGetValue(key, out var mapped) ? mapped.DisplayName : key;
     }
+
+    public static string ResolveInitials(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "?";
+        var key = NormalizeId(raw);
+        return ById.TryGetValue(key, out var mapped) ? mapped.Initials : key;
+    }
+
+    public static IReadOnlyList<(string Id, string DisplayName, string Initials)> SummaryColumns =>
+        SummaryColumnIds
+            .Where(id => ById.ContainsKey(id))
+            .Select(id => (id, ById[id].DisplayName, ById[id].Initials))
+            .ToList();
 
     public static string? ResolveOracleId(string? filter)
     {
