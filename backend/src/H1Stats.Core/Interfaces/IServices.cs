@@ -8,6 +8,9 @@ public interface IAuthService
     Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task LogoutAsync(string username, CancellationToken ct = default);
     Task<IReadOnlyList<string>> ListEnabledUsernamesAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<string>> GetFavoriteReportsAsync(string username, CancellationToken ct = default);
+    Task<(IReadOnlyList<string>? Paths, string? Error)> SetFavoriteReportsAsync(
+        string username, IReadOnlyList<string> paths, CancellationToken ct = default);
 }
 
 public interface IUserAdminService
@@ -15,6 +18,7 @@ public interface IUserAdminService
     Task<IReadOnlyList<UserDto>> ListUsersAsync(CancellationToken ct = default);
     Task<(UserDto? User, string? Error)> CreateUserAsync(CreateUserRequest request, CancellationToken ct = default);
     Task<(UserDto? User, string? Error)> UpdateUserAsync(string username, UpdateUserRequest request, CancellationToken ct = default);
+    Task<(bool Deleted, string? Error)> DeleteUserAsync(string username, CancellationToken ct = default);
 }
 
 public interface IDashboardService
@@ -44,10 +48,10 @@ public interface ICm2Repository
     Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringDoctorsAsync(string query, CancellationToken ct = default);
     Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringPracticesAsync(string query, CancellationToken ct = default);
     Task<ReferrerHistoryReport> GetReferrerHistoryAsync(
-        string mode, string entityId, string? investigationType, CancellationToken ct = default);
+        string mode, string entityId, string? investigationType, DateOnly dateFrom, DateOnly dateTo, string? grain = null, CancellationToken ct = default);
     Task<DrSummaryReport> GetDrSummaryAsync(int year, int month, CancellationToken ct = default);
     Task<DrSummaryReport> GetDrSummaryHistoryAsync(
-        string cardiologistId, int year, int month, CancellationToken ct = default);
+        string? cardiologistId, int year, int month, CancellationToken ct = default);
 }
 
 public interface IDatabaseConnectionService

@@ -214,16 +214,21 @@ public class ClinicalController : ControllerBase
         [FromQuery] string? mode,
         [FromQuery] string? id,
         [FromQuery] string? investigationType,
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] string? grain,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(mode))
             return BadRequest(new { message = "mode is required (doctor or practice)" });
         if (string.IsNullOrWhiteSpace(id))
             return BadRequest(new { message = "id is required" });
+        if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
+            return BadRequest(new { message = error });
 
         try
         {
-            var report = await _cm2.GetReferrerHistoryAsync(mode, id, investigationType, ct);
+            var report = await _cm2.GetReferrerHistoryAsync(mode, id, investigationType, from, to, grain, ct);
             return Ok(report);
         }
         catch (ArgumentException ex)
@@ -267,8 +272,6 @@ public class ClinicalController : ControllerBase
         [FromQuery] int? month,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(physician))
-            return BadRequest(new { message = "physician is required" });
         if (!MonthPeriod.TryParse(year, month, out var period, out var error))
             return BadRequest(new { message = error });
 

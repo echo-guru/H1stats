@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   Stethoscope,
@@ -36,12 +36,12 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/clinical', label: 'Overview' },
       { path: '/clinical/physician-statistics', label: 'Reporting Dr - Syngo' },
       { path: '/clinical/reporting-dr-cm2', label: 'Reporting Dr - CM2' },
-      { path: '/clinical/dr-summary-cm2', label: 'Dr Summary - CM2' },
+      { path: '/clinical/dr-summary-cm2', label: 'H1 Dr Summary (CM2)' },
       { path: '/clinical/top-referring-doctors-cm2', label: 'Top Referring Doctors - CM2' },
       { path: '/clinical/top-referring-practices-cm2', label: 'Top Referring Practices - CM2' },
       { path: '/clinical/referrers-growth-cm2', label: 'Referrers Growth by Quarter - CM2' },
       { path: '/clinical/referrers-decline-cm2', label: 'Referrers Decline by Quarter - CM2' },
-      { path: '/clinical/referrer-history-cm2', label: 'Referrer 12-Month History - CM2' },
+      { path: '/clinical/referrer-history-cm2', label: 'Search by referrer/practice' },
     ],
   },
   {
@@ -54,12 +54,14 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/admin/users', label: 'Users' },
       { path: '/admin/database', label: 'Database' },
       { path: '/admin/health', label: 'System Health' },
+      { path: '/admin/version-history', label: 'Version History' },
     ],
   },
 ]
 
 export default function Navigation() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { username, isAdmin, modules, logout } = useAuth()
 
   if (location.pathname === '/login') return null
@@ -115,7 +117,10 @@ export default function Navigation() {
             </span>
             <button
               type="button"
-              onClick={logout}
+              onClick={() => {
+                logout()
+                navigate('/login', { replace: true })
+              }}
               className="flex items-center gap-1 text-gray-500 hover:text-brand-accent transition-colors"
             >
               <LogOut className="h-4 w-4" />

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange, ClipboardList } from 'lucide-react'
+import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange, ClipboardList, Star } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { useReportFavorites } from '../hooks/useReportFavorites'
 
 interface ClinicalAction {
   title: string
@@ -23,7 +24,7 @@ const REPORTING_DR_ACTIONS: ClinicalAction[] = [
     icon: Stethoscope,
   },
   {
-    title: 'Dr Summary - CM2',
+    title: 'H1 Dr Summary (CM2)',
     description: 'Monthly OOS matrix by reporting cardiologist (Echo, DSE, SE, TEE, DCCS, Consults).',
     path: '/clinical/dr-summary-cm2',
     icon: ClipboardList,
@@ -56,18 +57,29 @@ const REFERRING_DR_ACTIONS: ClinicalAction[] = [
     icon: TrendingDown,
   },
   {
-    title: 'Referrer 12-Month History - CM2',
-    description: 'Search a referring doctor or practice and view the prior 12 months of referrals by month.',
+    title: 'Search by referrer/practice',
+    description: 'Search a referring doctor or practice and view monthly referral history for a date range.',
     path: '/clinical/referrer-history-cm2',
     icon: CalendarRange,
   },
 ]
 
-function ReportCards({ actions }: { actions: ClinicalAction[] }) {
+const ALL_REPORTS = [...REPORTING_DR_ACTIONS, ...REFERRING_DR_ACTIONS]
+
+function ReportCards({
+  actions,
+  isFavorite,
+  onToggleFavorite,
+}: {
+  actions: ClinicalAction[]
+  isFavorite: (path: string) => boolean
+  onToggleFavorite: (path: string) => void
+}) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {actions.map((action) => {
         const Icon = action.icon
+        const starred = isFavorite(action.path)
         return (
           <Link
             key={action.path}
@@ -78,7 +90,27 @@ function ReportCards({ actions }: { actions: ClinicalAction[] }) {
               <div className="rounded-lg bg-brand-primary-light p-2.5">
                 <Icon className="h-6 w-6 text-brand-primary" />
               </div>
-              <ArrowRight className="h-5 w-5 text-gray-300 group-hover:text-brand-primary transition-colors shrink-0 mt-1" />
+              <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onToggleFavorite(action.path)
+                  }}
+                  aria-label={starred ? `Remove ${action.title} from favorites` : `Add ${action.title} to favorites`}
+                  aria-pressed={starred}
+                  title={starred ? 'Remove from favorites' : 'Add to favorites'}
+                  className="p-1 rounded-md hover:bg-amber-50"
+                >
+                  <Star
+                    className={`h-5 w-5 ${
+                      starred ? 'fill-amber-400 text-amber-500' : 'text-gray-300 group-hover:text-amber-400'
+                    }`}
+                  />
+                </button>
+                <ArrowRight className="h-5 w-5 text-gray-300 group-hover:text-brand-primary transition-colors" />
+              </div>
             </div>
             <h3 className="mt-4 text-lg font-semibold text-brand-accent">{action.title}</h3>
             <p className="mt-1 text-sm text-gray-600">{action.description}</p>
@@ -90,6 +122,12 @@ function ReportCards({ actions }: { actions: ClinicalAction[] }) {
 }
 
 export default function ClinicalHome() {
+  const { favorites, isFavorite, toggleFavorite } = useReportFavorites()
+  const reportsByPath = Object.fromEntries(ALL_REPORTS.map((action) => [action.path, action]))
+  const favoriteActions = favorites
+    .map((path) => reportsByPath[path])
+    .filter((action): action is ClinicalAction => Boolean(action))
+
   return (
     <div className="space-y-8">
       <div className="flex items-center gap-3">
@@ -101,15 +139,43 @@ export default function ClinicalHome() {
       </div>
 
       <section className="space-y-4">
+        <h3 className="text-lg font-semibold text-brand-primary flex items-center gap-2">
+          <Star className="h-5 w-5 fill-amber-400 text-amber-500" />
+          Favorites
+        </h3>
+        {favoriteActions.length === 0 ? (
+          <p className="text-sm text-gray-500 bg-white rounded-lg border border-dashed border-brand-primary-border px-4 py-6">
+            Star reports below to pin them here. Your favorites are saved for your login.
+          </p>
+        ) : (
+          <ReportCards
+            actions={favoriteActions}
+            isFavorite={isFavorite}
+            onToggleFavorite={toggleFavorite}
+          />
+        )}
+      </section>
+
+      <hr className="border-brand-primary-border" />
+
+      <section className="space-y-4">
         <h3 className="text-lg font-semibold text-brand-primary">Reporting Dr</h3>
-        <ReportCards actions={REPORTING_DR_ACTIONS} />
+        <ReportCards
+          actions={REPORTING_DR_ACTIONS}
+          isFavorite={isFavorite}
+          onToggleFavorite={toggleFavorite}
+        />
       </section>
 
       <hr className="border-brand-primary-border" />
 
       <section className="space-y-4">
         <h3 className="text-lg font-semibold text-brand-primary">Referring Dr</h3>
-        <ReportCards actions={REFERRING_DR_ACTIONS} />
+        <ReportCards
+          actions={REFERRING_DR_ACTIONS}
+          isFavorite={isFavorite}
+          onToggleFavorite={toggleFavorite}
+        />
       </section>
     </div>
   )

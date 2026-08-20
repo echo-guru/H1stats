@@ -17,7 +17,8 @@ builder.Services.AddSingleton<ModuleRegistry>(_ => new ModuleRegistry([
 ]));
 
 // Dependency injection
-builder.Services.AddSingleton<IAuthService, AuthService>();
+var usersFilePath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "users.json");
+builder.Services.AddSingleton<IAuthService>(_ => new AuthService(usersFilePath));
 builder.Services.AddSingleton<IUserAdminService>(sp => (AuthService)sp.GetRequiredService<IAuthService>());
 builder.Services.AddSingleton<IDatabaseConnectionService, DatabaseConnectionService>();
 builder.Services.AddScoped<IPhysicianStatisticsRepository, PhysicianStatisticsRepository>();

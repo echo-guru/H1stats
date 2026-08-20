@@ -21,6 +21,9 @@ public static class Cm2DrSummaryMapping
     /// </summary>
     public static readonly IReadOnlyList<int> DccsOccServiceIds = [6, 101];
 
+    /// <summary>Sentinel column id for all Hearts 1st reporting cardiologists combined.</summary>
+    public const string AllDoctorsColumnId = "all-drs-total";
+
     /// <summary>Cardiologists omitted from Dr Summary columns (RHS, Dr Masashi Ura).</summary>
     public static readonly HashSet<string> ExcludedCardiologistIds = new(StringComparer.OrdinalIgnoreCase)
     {

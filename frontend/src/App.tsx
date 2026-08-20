@@ -16,6 +16,7 @@ import ClinicalHome from './pages/ClinicalHome'
 import AdminHome from './pages/AdminHome'
 import AdminUsers from './pages/AdminUsers'
 import AdminDatabase from './pages/AdminDatabase'
+import AdminVersionHistory from './pages/AdminVersionHistory'
 import SystemHealth from './pages/SystemHealth'
 
 function App() {
@@ -42,6 +43,7 @@ function App() {
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/database" element={<AdminDatabase />} />
               <Route path="/admin/health" element={<SystemHealth />} />
+              <Route path="/admin/version-history" element={<AdminVersionHistory />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

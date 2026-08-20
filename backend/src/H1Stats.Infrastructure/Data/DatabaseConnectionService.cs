@@ -1,6 +1,7 @@
 using H1Stats.Core.Configuration;
 using H1Stats.Core.Interfaces;
 using H1Stats.Core.Models;
+using H1Stats.Core.Services;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using Oracle.ManagedDataAccess.Client;
@@ -133,8 +134,13 @@ public class DatabaseConnectionService : IDatabaseConnectionService
 public class DashboardService : IDashboardService
 {
     private readonly IPhysicianStatisticsRepository _repo;
+    private readonly ICm2Repository _cm2;
 
-    public DashboardService(IPhysicianStatisticsRepository repo) => _repo = repo;
+    public DashboardService(IPhysicianStatisticsRepository repo, ICm2Repository cm2)
+    {
+        _repo = repo;
+        _cm2 = cm2;
+    }
 
     public async Task<DashboardSummary> GetSummaryAsync(CancellationToken ct = default)
     {
@@ -148,11 +154,19 @@ public class DashboardService : IDashboardService
             var todayReport = await _repo.GetReportAsync(today, today, null, ct);
             var weekReport = await _repo.GetReportAsync(weekStart, today, null, ct);
             var monthReport = await _repo.GetReportAsync(monthStart, today, null, ct);
+            var cm2Month = await _cm2.GetReportingDrReportAsync(monthStart, today, null, ct);
 
-            var topPhysicians = monthReport.Groups
-                .Select(g => new NamedCount(g.Physician, g.Subtotal.Total))
+            var countsByName = cm2Month.Groups.ToDictionary(
+                g => g.Physician,
+                g => g.Subtotal.Total,
+                StringComparer.OrdinalIgnoreCase);
+
+            var topPhysicians = Cm2CardiologistMapping.SummaryColumns
+                .Select(c => new NamedCount(
+                    c.DisplayName,
+                    countsByName.GetValueOrDefault(c.DisplayName)))
                 .OrderByDescending(x => x.Count)
-                .Take(5)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             var studyMix = monthReport.Groups

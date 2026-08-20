@@ -17,6 +17,7 @@ const SERIES: { key: string; label: string; color: string }[] = [
   { key: 'echo-total', label: 'Echo', color: '#33758F' },
   { key: 'se-total', label: 'SE', color: '#69A8BC' },
   { key: 'dse-total', label: 'DSE', color: '#A63746' },
+  { key: 'tee-total', label: 'TEE', color: '#5C6BC0' },
   { key: 'consults', label: 'Consults', color: '#C4A35A' },
 ]
 
@@ -60,7 +61,7 @@ function DoctorPieChart({ doctor, onSelect }: { doctor: DoctorPie; onSelect?: (i
         viewBox="0 0 160 160"
         className="w-44 h-44"
         role="img"
-        aria-label={`${doctor.displayName} mix of Echo, SE, DSE, and Consults`}
+        aria-label={`${doctor.displayName} mix of Echo, SE, DSE, TEE, and Consults`}
       >
         {doctor.total === 0 ? (
           <circle cx={cx} cy={cy} r={r} fill="#e8f1f5" stroke="#a8c9d9" />

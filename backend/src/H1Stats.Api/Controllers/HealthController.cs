@@ -20,7 +20,7 @@ public class HealthController : ControllerBase
         var uptime = DateTime.UtcNow - StartedAt;
         var response = new HealthResponse(
             "Healthy",
-            "1.0.0",
+            "1.4.0",
             sql,
             $"{uptime.Days}d {uptime.Hours}h {uptime.Minutes}m"
         );

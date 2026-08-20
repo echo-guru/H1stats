@@ -85,4 +85,31 @@ public static class MonthPeriod
         current = Of(year.Value, month.Value);
         return true;
     }
+
+    /// <summary>
+    /// Calendar months that overlap an inclusive date range, oldest first.
+    /// </summary>
+    public static IReadOnlyList<(string YearMonth, string Label, DateOnly From, DateOnly ToExclusive)> MonthsInRange(
+        DateOnly dateFrom, DateOnly dateTo)
+    {
+        if (dateFrom > dateTo)
+            throw new ArgumentException("dateFrom must be on or before dateTo.");
+
+        var cursor = new DateOnly(dateFrom.Year, dateFrom.Month, 1);
+        var last = new DateOnly(dateTo.Year, dateTo.Month, 1);
+        var enAu = CultureInfo.GetCultureInfo("en-AU");
+        var months = new List<(string YearMonth, string Label, DateOnly From, DateOnly ToExclusive)>();
+        while (cursor <= last)
+        {
+            var next = cursor.AddMonths(1);
+            months.Add((
+                cursor.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                cursor.ToString("MMM yyyy", enAu),
+                cursor,
+                next));
+            cursor = next;
+        }
+
+        return months;
+    }
 }

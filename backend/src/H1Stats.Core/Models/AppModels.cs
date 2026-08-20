@@ -18,7 +18,8 @@ public record UserAccount(
     bool IsDisabled,
     IReadOnlyList<string> Modules,
     int FailedLoginAttempts = 0,
-    DateTime? LockedUntil = null
+    DateTime? LockedUntil = null,
+    IReadOnlyList<string>? FavoriteReportPaths = null
 );
 
 public record LoginRequest(string Username, string Password);
@@ -29,7 +30,31 @@ public record UserDto(string Username, bool IsAdmin, bool IsDisabled);
 
 public record CreateUserRequest(string Username, string Password, bool IsAdmin);
 
-public record UpdateUserRequest(string? Password, bool? IsAdmin);
+public record UpdateUserRequest(string? Password, bool? IsAdmin, bool? IsDisabled, string? NewUsername);
+
+public record SetFavoriteReportsRequest(string Username, IReadOnlyList<string> Paths);
+
+public static class ClinicalReportCatalog
+{
+    public static readonly IReadOnlySet<string> Paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "/clinical/physician-statistics",
+        "/clinical/reporting-dr-cm2",
+        "/clinical/dr-summary-cm2",
+        "/clinical/top-referring-doctors-cm2",
+        "/clinical/top-referring-practices-cm2",
+        "/clinical/referrers-growth-cm2",
+        "/clinical/referrers-decline-cm2",
+        "/clinical/referrer-history-cm2",
+    };
+
+    public static IReadOnlyList<string> Normalize(IEnumerable<string>? paths) =>
+        (paths ?? [])
+            .Select(p => p?.Trim() ?? "")
+            .Where(p => Paths.Contains(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+}
 
 public record CardiologistOption(string Id, string DisplayName);
 
@@ -172,13 +197,22 @@ public record ReferrerHistoryTestRow(
     int Outpatient,
     int Inpatient);
 
+public record ReferrerHistoryDoctorRow(
+    string DoctorId,
+    string DisplayName,
+    int Total,
+    int Outpatient,
+    int Inpatient,
+    IReadOnlyList<ReferrerHistoryTestRow> TestRows);
+
 public record ReferrerHistoryMonthRow(
     string YearMonth,
     string Label,
     int Total,
     int Outpatient,
     int Inpatient,
-    IReadOnlyList<ReferrerHistoryTestRow> TestRows);
+    IReadOnlyList<ReferrerHistoryTestRow> TestRows,
+    IReadOnlyList<ReferrerHistoryDoctorRow> DoctorRows);
 
 public record DrSummaryColumn(string Id, string Initials, string DisplayName);
 
@@ -208,7 +242,8 @@ public record ReferrerHistoryReport(
     IReadOnlyList<string> CombinedSites,
     IReadOnlyList<ReferrerHistoryMonthRow> Months,
     CountTriple GrandTotal,
-    string? InvestigationTypeFilter = null);
+    string? InvestigationTypeFilter = null,
+    string Grain = "month");
 
 public record ConnectionTestResult(bool Connected, string Message, DateTime? TestedAt = null);
 

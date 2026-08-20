@@ -43,6 +43,17 @@ public class AdminController : ControllerBase
         return Ok(user);
     }
 
+    [HttpDelete("users/{username}")]
+    public async Task<IActionResult> DeleteUser(string username, CancellationToken ct)
+    {
+        var (deleted, error) = await _users.DeleteUserAsync(username, ct);
+        if (error == "User not found")
+            return NotFound(new { message = error });
+        if (error is not null)
+            return BadRequest(new { message = error });
+        return deleted ? Ok() : NotFound();
+    }
+
     [HttpGet("database")]
     public IActionResult GetDatabaseConfig() => Ok(_db.GetSettings());
 

@@ -34,4 +34,26 @@ public class AuthController : ControllerBase
         await _auth.LogoutAsync(User?.Identity?.Name ?? "", ct);
         return Ok();
     }
+
+    [HttpGet("favorites")]
+    public async Task<IActionResult> GetFavorites([FromQuery] string? username, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            return BadRequest(new { message = "username is required" });
+
+        var paths = await _auth.GetFavoriteReportsAsync(username, ct);
+        return Ok(paths);
+    }
+
+    [HttpPut("favorites")]
+    public async Task<IActionResult> SetFavorites([FromBody] SetFavoriteReportsRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Username))
+            return BadRequest(new { message = "username is required" });
+
+        var (paths, error) = await _auth.SetFavoriteReportsAsync(request.Username, request.Paths ?? [], ct);
+        if (error is not null)
+            return NotFound(new { message = error });
+        return Ok(paths);
+    }
 }

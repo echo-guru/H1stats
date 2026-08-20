@@ -6,10 +6,18 @@ import { useAuth } from '../contexts/AuthContext'
 import { canAccessPath, defaultPathForUser } from '../utils/permissions'
 
 const LAST_USERNAME_KEY = 'h1stats_last_username'
-const FALLBACK_USERNAMES = ['admin', 'clinical', 'tonyf']
+
+async function fetchLoginUsernames(): Promise<string[]> {
+  const res = await fetch('/api/auth/usernames', { cache: 'no-store' })
+  if (!res.ok) throw new Error('Failed to load usernames')
+  const list = await res.json()
+  if (!Array.isArray(list)) throw new Error('Invalid usernames response')
+  return list.map((item: unknown) => String(item)).filter(Boolean)
+}
 
 export default function Login() {
   const [usernames, setUsernames] = useState<string[]>([])
+  const [usernamesLoading, setUsernamesLoading] = useState(true)
   const [username, setUsername] = useState(() => localStorage.getItem(LAST_USERNAME_KEY) ?? '')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -32,24 +40,33 @@ export default function Login() {
     }
   }, [currentUser, isAdmin, modules, navigate])
 
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/auth/usernames')
-      .then((r) => (r.ok ? r.json() : FALLBACK_USERNAMES))
-      .then((list) => {
-        if (cancelled) return
-        const names = Array.isArray(list)
-          ? list.map((item: unknown) => String(item)).filter(Boolean)
-          : FALLBACK_USERNAMES
-        setUsernames(names.length > 0 ? names : FALLBACK_USERNAMES)
-      })
-      .catch(() => {
-        if (!cancelled) setUsernames(FALLBACK_USERNAMES)
-      })
-    return () => {
-      cancelled = true
+  const loadUsernames = React.useCallback(async () => {
+    setUsernamesLoading(true)
+    try {
+      const names = await fetchLoginUsernames()
+      setUsernames(names)
+    } catch {
+      setUsernames((prev) => prev)
+    } finally {
+      setUsernamesLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    void loadUsernames()
+  }, [loadUsernames])
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void loadUsernames()
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [loadUsernames])
 
   useEffect(() => {
     if (usernames.length === 0) return
@@ -99,7 +116,10 @@ export default function Login() {
               autoFocus
               required
             >
-              {usernames.length === 0 && <option value="">Loading users…</option>}
+              {usernamesLoading && usernames.length === 0 && <option value="">Loading users…</option>}
+              {!usernamesLoading && usernames.length === 0 && (
+                <option value="">No users available — check the API is running</option>
+              )}
               {usernames.map((name) => (
                 <option key={name} value={name}>{name}</option>
               ))}

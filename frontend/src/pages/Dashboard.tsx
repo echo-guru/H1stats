@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, Activity, Users, PieChart, Clock } from 'lucide-react'
+import { LayoutDashboard, Activity, Users, PieChart, Clock, LineChart } from 'lucide-react'
 import { WidgetCard, StatWidget } from '../components/widgets/WidgetCard'
+import {
+  Cm2VolumeTrendChart,
+  monthTotal,
+  volumeMonthsFromDrSummary,
+  type Cm2VolumeMonth,
+} from '../components/Cm2VolumeTrendChart'
 import { formatPersonName } from '../lib/utils'
 
 interface DashboardSummary {
@@ -9,7 +15,6 @@ interface DashboardSummary {
   studiesThisMonth: number
   topPhysicians: { name: string; count: number }[]
   studyMix: { name: string; count: number; inpatient: number; outpatient: number }[]
-  recentActivity: { description: string; at: string }[]
 }
 
 function formatInOutRatio(inpatient: number, outpatient: number): string {
@@ -25,12 +30,63 @@ const PLACEHOLDER: DashboardSummary = {
   studiesThisMonth: 0,
   topPhysicians: [],
   studyMix: [],
-  recentActivity: [],
+}
+
+const ALL_DRS_TOTAL_ID = 'all-drs-total'
+const HEARTS1ST_IDS = ['282', '2901', '1681', '1941', '144', '981']
+
+interface DrSummaryHistory {
+  columns: { id: string; initials: string; displayName: string }[]
+  rows: { key: string; counts: number[] }[]
+}
+
+async function fetchDrSummaryHistory(physician: string, year: number, month: number): Promise<DrSummaryHistory> {
+  const params = new URLSearchParams({
+    physician,
+    year: String(year),
+    month: String(month),
+  })
+  const res = await fetch(`/api/clinical/cm2/dr-summary/history?${params}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || 'CM2 history failed')
+  }
+  return res.json()
+}
+
+function sumDrSummaryHistories(histories: DrSummaryHistory[]): DrSummaryHistory {
+  const base = histories[0]
+  if (!base) throw new Error('CM2 history failed')
+  return {
+    columns: base.columns,
+    rows: base.rows.map((row, rowIndex) => ({
+      ...row,
+      counts: row.counts.map((_, monthIndex) =>
+        histories.reduce((sum, history) => sum + (history.rows[rowIndex]?.counts[monthIndex] ?? 0), 0),
+      ),
+    })),
+  }
+}
+
+async function loadCm2VolumeTrend(): Promise<Cm2VolumeMonth[]> {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+  const combined = await fetchDrSummaryHistory(ALL_DRS_TOTAL_ID, year, month)
+  const fromCombined = volumeMonthsFromDrSummary(combined.columns, combined.rows)
+  if (fromCombined.some((m) => monthTotal(m) > 0)) return fromCombined
+
+  const histories = await Promise.all(HEARTS1ST_IDS.map((id) => fetchDrSummaryHistory(id, year, month)))
+  const summed = sumDrSummaryHistories(histories)
+  return volumeMonthsFromDrSummary(summed.columns, summed.rows)
 }
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardSummary>(PLACEHOLDER)
   const [loading, setLoading] = useState(true)
+  const [cm2Trend, setCm2Trend] = useState<Cm2VolumeMonth[]>([])
+  const [cm2TrendLoading, setCm2TrendLoading] = useState(true)
+  const [cm2TrendError, setCm2TrendError] = useState('')
 
   useEffect(() => {
     fetch('/api/dashboard/summary')
@@ -38,6 +94,11 @@ export default function Dashboard() {
       .then(setData)
       .catch(() => setData(PLACEHOLDER))
       .finally(() => setLoading(false))
+
+    loadCm2VolumeTrend()
+      .then(setCm2Trend)
+      .catch((e) => setCm2TrendError(e instanceof Error ? e.message : 'CM2 trend failed'))
+      .finally(() => setCm2TrendLoading(false))
   }, [])
 
   return (
@@ -67,10 +128,10 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <WidgetCard title="Top Reporting Physicians" icon={Users}>
+        <WidgetCard title="Top reporting Drs (CM2, this month)" icon={Users}>
           {data.topPhysicians.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              Connect SQL Server to populate widget data
+              Hearts 1st reporting cardiologist volumes will appear here
             </p>
           ) : (
             <ul className="space-y-2">
@@ -112,18 +173,23 @@ export default function Dashboard() {
         </WidgetCard>
       </div>
 
-      <WidgetCard title="Recent Activity" icon={Activity}>
-        {data.recentActivity.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-2">No recent activity</p>
+      <WidgetCard title="Hearts 1st tests (CM2, 12 months)" icon={LineChart}>
+        {cm2TrendLoading ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">Loading 12-month CM2 volume…</p>
+        ) : cm2TrendError ? (
+          <p className="text-sm text-red-600 py-4 text-center">{cm2TrendError}</p>
+        ) : cm2Trend.length === 0 || cm2Trend.every((m) => monthTotal(m) === 0) ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">
+            Combined Dr Summary totals will appear here
+          </p>
         ) : (
-          <ul className="divide-y divide-brand-primary-border">
-            {data.recentActivity.map((a, i) => (
-              <li key={i} className="py-2 text-sm flex justify-between">
-                <span>{a.description}</span>
-                <span className="text-muted-foreground">{a.at}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-1">
+            <p className="text-xs text-gray-500">
+              All Hearts 1st reporting cardiologists. Total, then Echo, stress echo/Dob (SE + DSE), TEE / IOE, and
+              consults. Each graph uses its own scale.
+            </p>
+            <Cm2VolumeTrendChart months={cm2Trend} />
+          </div>
         )}
       </WidgetCard>
     </div>

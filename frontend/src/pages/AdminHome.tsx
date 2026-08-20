@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { Settings, Users, Database, Activity, ArrowRight } from 'lucide-react'
+import { Settings, Users, Database, Activity, History, ArrowRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { APP_VERSION } from '../data/versionHistory'
 
 interface AdminAction {
   title: string
@@ -27,6 +28,12 @@ const ADMIN_ACTIONS: AdminAction[] = [
     description: 'Check API status and SQL Server connectivity.',
     path: '/admin/health',
     icon: Activity,
+  },
+  {
+    title: 'Version History',
+    description: `What changed in H1Stats. You are on v${APP_VERSION}.`,
+    path: '/admin/version-history',
+    icon: History,
   },
 ]
 

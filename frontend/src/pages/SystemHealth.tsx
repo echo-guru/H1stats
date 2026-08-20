@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Activity, CheckCircle, XCircle } from 'lucide-react'
 import { AdminBackLink } from '../components/AdminBackLink'
 
@@ -43,7 +44,9 @@ export default function SystemHealth() {
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-brand-primary font-medium">Version</span>
-              <span>{health.version}</span>
+              <Link to="/admin/version-history" className="text-brand-primary hover:underline">
+                {health.version}
+              </Link>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-brand-primary font-medium">Uptime</span>

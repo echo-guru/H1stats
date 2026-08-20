@@ -11,6 +11,7 @@ backend/**/obj/
 .env.local
 backend/src/H1Stats.Api/appsettings.Development.json
 backend/src/H1Stats.Api/appsettings.Development.local.json
+backend/src/H1Stats.Api/App_Data/
 
 # Editor / OS
 .vs/

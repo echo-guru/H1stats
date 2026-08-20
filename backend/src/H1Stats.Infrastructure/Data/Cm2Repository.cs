@@ -1018,13 +1018,15 @@ public class Cm2Repository : ICm2Repository
     }
 
     public async Task<ReferrerHistoryReport> GetReferrerHistoryAsync(
-        string mode, string entityId, string? investigationType, CancellationToken ct = default)
+        string mode, string entityId, string? investigationType, DateOnly dateFrom, DateOnly dateTo, string? grain = null, CancellationToken ct = default)
     {
         var isPractice = string.Equals(mode, "practice", StringComparison.OrdinalIgnoreCase);
         var isDoctor = string.Equals(mode, "doctor", StringComparison.OrdinalIgnoreCase)
             || string.Equals(mode, "dr", StringComparison.OrdinalIgnoreCase);
         if (!isPractice && !isDoctor)
             throw new ArgumentException("mode must be doctor or practice.", nameof(mode));
+        if (dateFrom > dateTo)
+            throw new ArgumentException("dateFrom must be on or before dateTo.");
 
         var modeKey = isPractice ? "practice" : "doctor";
         if (!TryParseEntityId(entityId, out var idKind, out var rid))
@@ -1032,7 +1034,10 @@ public class Cm2Repository : ICm2Repository
         if (isPractice && idKind != "CM2")
             throw new ArgumentException("Practice search requires a CM2 practice id.", nameof(entityId));
 
-        var window = MonthPeriod.Prior12();
+        var quarterly = string.Equals(grain?.Trim(), "quarter", StringComparison.OrdinalIgnoreCase);
+        var grainKey = quarterly ? "quarter" : "month";
+        var monthsWindow = MonthPeriod.MonthsInRange(dateFrom, dateTo);
+        var dateToExclusive = dateTo.AddDays(1);
         var typeCode = Cm2InvestigationTypeMapping.ResolveReferringDoctorCode(investigationType);
         var typeFilter = string.IsNullOrWhiteSpace(typeCode)
             ? "AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)"
@@ -1057,10 +1062,39 @@ public class Cm2Repository : ICm2Repository
                         NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NVL(NULLIF(TRIM(cp.PRAC_ALIAS), ''), 'Unnamed Practice'))
                     ELSE NULL
                 END AS PracticeName,
+                CASE
+                    WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END AS PersonId,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
+                END AS DoctorName,
                 COUNT(DISTINCT t.TEST_RID) AS StudyCount
             FROM {Schema}.TEST t
             LEFT JOIN {Schema}.DOCTOR d
               ON d.DOCTOR_RID = t.REFERRING_DOCTOR
+            LEFT JOIN {Schema}.CM2_DOCTOR cd
+              ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
             LEFT JOIN {Schema}.CM2_PRACTICE cp
               ON cp.CM2_PRACTICE_RID = d.CM2_PRACTICE_RID
             WHERE t.TEST_DATE >= :DateFrom
@@ -1075,17 +1109,44 @@ public class Cm2Repository : ICm2Repository
                     WHEN cp.CM2_PRACTICE_RID IS NOT NULL THEN
                         NVL(NULLIF(TRIM(cp.PRAC_NAME), ''), NVL(NULLIF(TRIM(cp.PRAC_ALIAS), ''), 'Unnamed Practice'))
                     ELSE NULL
+                END,
+                CASE
+                    WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                         AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                    THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                    WHEN t.REFERRING_DOCTOR IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                         AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                    THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                    ELSE 'UNKNOWN'
+                END,
+                CASE
+                    WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(cd.DOC_TITLE || ' ', '') ||
+                            NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                            NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                            NVL(cd.DOC_LASTNAME, '')
+                        )
+                    WHEN d.DOCTOR_RID IS NOT NULL THEN
+                        TRIM(
+                            NVL(d.DOCTOR_TITLE || ' ', '') ||
+                            NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                            NVL(d.DOCTOR_LASTNAME, '')
+                        )
+                    ELSE NULL
                 END
             """;
 
-        var rows = new List<(string YearMonth, string InvestigationType, string? Ward, string? PracticeName, int Count)>();
+        var rows = new List<(string YearMonth, string InvestigationType, string? Ward, string? PracticeName, string DoctorId, string DoctorName, int Count)>();
         await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.BindByName = true;
         cmd.CommandText = sql;
-        cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = window.From.ToDateTime(TimeOnly.MinValue);
-        cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = window.ToExclusive.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateToExclusive.ToDateTime(TimeOnly.MinValue);
         cmd.Parameters.Add("Rid", OracleDbType.Decimal).Value = Convert.ToDecimal(rid);
         if (!string.IsNullOrWhiteSpace(typeCode))
             cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
@@ -1099,39 +1160,67 @@ public class Cm2Repository : ICm2Repository
             var rawType = reader.IsDBNull(1) ? null : reader.GetString(1);
             var ward = reader.IsDBNull(2) ? null : reader.GetString(2);
             var practiceName = reader.IsDBNull(3) ? null : reader.GetString(3)?.Trim();
+            var doctorId = reader.IsDBNull(4) ? "UNKNOWN" : reader.GetString(4);
+            var doctorName = reader.IsDBNull(5) ? null : reader.GetString(5)?.Trim();
+            if (string.IsNullOrWhiteSpace(doctorName))
+                doctorName = doctorId == "UNKNOWN" ? "Unknown" : doctorId;
             rows.Add((
                 yearMonth,
                 Cm2InvestigationTypeMapping.ResolveDisplayName(rawType),
                 ward,
                 string.IsNullOrWhiteSpace(practiceName) ? null : practiceName,
-                Convert.ToInt32(reader.GetValue(4))));
+                string.IsNullOrWhiteSpace(doctorId) ? "UNKNOWN" : doctorId,
+                doctorName,
+                Convert.ToInt32(reader.GetValue(6))));
         }
 
-        var byMonth = rows.ToLookup(r => r.YearMonth, StringComparer.Ordinal);
-        var months = window.Months
-            .Select(m =>
+        var byPeriod = rows.ToLookup(
+            r => quarterly ? YearMonthToQuarterKey(r.YearMonth) : r.YearMonth,
+            StringComparer.Ordinal);
+        var periods = quarterly
+            ? QuarterPeriod.QuartersInRange(dateFrom, dateTo)
+                .Select(q => (q.Key, q.Label))
+            : monthsWindow.Select(m => (Key: m.YearMonth, m.Label));
+        var months = periods
+            .Select(p =>
             {
-                var monthRows = byMonth[m.YearMonth].ToList();
-                var testRows = monthRows
-                    .GroupBy(r => r.InvestigationType)
-                    .Select(tg =>
-                    {
-                        var total = tg.Sum(r => r.Count);
-                        var outpatient = tg.Where(r => WardClassification.IsCm2Outpatient(r.Ward)).Sum(r => r.Count);
-                        var inpatient = tg.Where(r => WardClassification.IsCm2Inpatient(r.Ward)).Sum(r => r.Count);
-                        return new ReferrerHistoryTestRow(tg.Key, total, outpatient, inpatient);
-                    })
-                    .OrderByDescending(t => t.Total)
-                    .ThenBy(t => t.InvestigationType)
-                    .ToList();
+                var periodRows = byPeriod[p.Key].ToList();
+                var testRows = AggregateTestRows(periodRows);
+                IReadOnlyList<ReferrerHistoryDoctorRow> doctorRows = isPractice
+                    ? periodRows
+                        .GroupBy(r => r.DoctorId, StringComparer.OrdinalIgnoreCase)
+                        .Select(dg =>
+                        {
+                            var doctorTests = AggregateTestRows(dg);
+                            var displayName = dg
+                                .Select(r => r.DoctorName)
+                                .Where(n => !string.IsNullOrWhiteSpace(n))
+                                .GroupBy(n => n, StringComparer.OrdinalIgnoreCase)
+                                .OrderByDescending(g => g.Count())
+                                .Select(g => g.Key)
+                                .FirstOrDefault()
+                                ?? dg.Key;
+                            return new ReferrerHistoryDoctorRow(
+                                dg.Key,
+                                displayName,
+                                doctorTests.Sum(t => t.Total),
+                                doctorTests.Sum(t => t.Outpatient),
+                                doctorTests.Sum(t => t.Inpatient),
+                                doctorTests);
+                        })
+                        .OrderByDescending(d => d.Total)
+                        .ThenBy(d => d.DisplayName)
+                        .ToList()
+                    : [];
 
                 return new ReferrerHistoryMonthRow(
-                    m.YearMonth,
-                    m.Label,
+                    p.Key,
+                    p.Label,
                     testRows.Sum(t => t.Total),
                     testRows.Sum(t => t.Outpatient),
                     testRows.Sum(t => t.Inpatient),
-                    testRows);
+                    testRows,
+                    doctorRows);
             })
             .ToList();
 
@@ -1155,15 +1244,31 @@ public class Cm2Repository : ICm2Repository
             entityId.Trim(),
             resolved.Value.DisplayName,
             resolved.Value.Suburb,
-            window.From,
-            window.ToExclusive.AddDays(-1),
+            dateFrom,
+            dateTo,
             combinedSites,
             months,
             grand,
             string.IsNullOrWhiteSpace(typeCode)
                 ? null
-                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode));
+                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode),
+            grainKey);
     }
+
+    private static List<ReferrerHistoryTestRow> AggregateTestRows(
+        IEnumerable<(string YearMonth, string InvestigationType, string? Ward, string? PracticeName, string DoctorId, string DoctorName, int Count)> rows) =>
+        rows
+            .GroupBy(r => r.InvestigationType)
+            .Select(tg =>
+            {
+                var total = tg.Sum(r => r.Count);
+                var outpatient = tg.Where(r => WardClassification.IsCm2Outpatient(r.Ward)).Sum(r => r.Count);
+                var inpatient = tg.Where(r => WardClassification.IsCm2Inpatient(r.Ward)).Sum(r => r.Count);
+                return new ReferrerHistoryTestRow(tg.Key, total, outpatient, inpatient);
+            })
+            .OrderByDescending(t => t.Total)
+            .ThenBy(t => t.InvestigationType)
+            .ToList();
 
     private async Task<(string DisplayName, string? Suburb)?> ResolveEntityAsync(
         bool isPractice, string idKind, string rid, CancellationToken ct)
@@ -1224,6 +1329,16 @@ public class Cm2Repository : ICm2Repository
         if (string.IsNullOrWhiteSpace(name))
             name = isPractice ? "Unnamed Practice" : "Unknown";
         return (name, string.IsNullOrWhiteSpace(suburb) ? null : suburb);
+    }
+
+    private static string YearMonthToQuarterKey(string yearMonth)
+    {
+        if (yearMonth.Length < 7
+            || !int.TryParse(yearMonth.AsSpan(5, 2), out var month)
+            || month is < 1 or > 12)
+            return yearMonth;
+        var quarter = (month - 1) / 3 + 1;
+        return $"{yearMonth[..4]}-Q{quarter}";
     }
 
     private static bool TryParseEntityId(string? id, out string kind, out string rid)
@@ -1424,8 +1539,11 @@ public class Cm2Repository : ICm2Repository
     }
 
     public async Task<DrSummaryReport> GetDrSummaryHistoryAsync(
-        string cardiologistId, int year, int month, CancellationToken ct = default)
+        string? cardiologistId, int year, int month, CancellationToken ct = default)
     {
+        if (IsAllDoctorsHistory(cardiologistId))
+            return await GetAllDoctorsDrSummaryHistoryAsync(year, month, ct);
+
         var id = Cm2CardiologistMapping.NormalizeId(cardiologistId);
         if (string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Cardiologist is required.", nameof(cardiologistId));
@@ -1556,6 +1674,167 @@ public class Cm2Repository : ICm2Repository
             columns,
             acc.ToRows());
     }
+
+    private async Task<DrSummaryReport> GetAllDoctorsDrSummaryHistoryAsync(
+        int year, int month, CancellationToken ct)
+    {
+        var asOf = new DateOnly(year, month, 1);
+        var window = MonthPeriod.Prior12(asOf);
+        var dateFrom = window.From.ToDateTime(TimeOnly.MinValue);
+        var dateToExclusive = window.ToExclusive.ToDateTime(TimeOnly.MinValue);
+        var monthKeys = window.Months.Select(m => m.YearMonth).ToList();
+        var monthIndex = monthKeys
+            .Select((key, i) => (key, i))
+            .ToDictionary(x => x.key, x => x.i, StringComparer.OrdinalIgnoreCase);
+
+        int MonthCol(string? yearMonth) =>
+            yearMonth is not null && monthIndex.TryGetValue(yearMonth, out var i) ? i : -1;
+
+        int MonthColForCardiologist(string? yearMonth, string? rawId)
+        {
+            var id = Cm2CardiologistMapping.NormalizeId(rawId);
+            if (string.IsNullOrWhiteSpace(id)
+                || Cm2CardiologistMapping.IsUndefinedId(id)
+                || Cm2DrSummaryMapping.IsExcludedCardiologist(id))
+                return -1;
+            return MonthCol(yearMonth);
+        }
+
+        var acc = new DrSummaryAccumulator(monthKeys.Count);
+        var dccsIds = string.Join(", ", Cm2DrSummaryMapping.DccsOccServiceIds);
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT
+                    TO_CHAR(t.TEST_DATE, 'YYYY-MM') AS YearMonth,
+                    TRIM(TO_CHAR(t.CARDIOLOGIST1)) AS CardiologistId,
+                    NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '') AS StudyType,
+                    NULLIF(TRIM(TO_CHAR(t.WARD)), '') AS Ward,
+                    COUNT(DISTINCT t.TEST_RID) AS StudyCount
+                FROM {Schema}.TEST t
+                WHERE t.TEST_DATE >= :DateFrom
+                  AND t.TEST_DATE < :DateToExclusive
+                  AND t.TEST_REQUIRED IN (1, 2, 3, 4)
+                GROUP BY
+                    TO_CHAR(t.TEST_DATE, 'YYYY-MM'),
+                    TRIM(TO_CHAR(t.CARDIOLOGIST1)),
+                    NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), ''),
+                    NULLIF(TRIM(TO_CHAR(t.WARD)), '')
+                """;
+            cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom;
+            cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateToExclusive;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var ym = reader.IsDBNull(0) ? null : reader.GetString(0);
+                var cardio = reader.IsDBNull(1) ? "" : reader.GetString(1).Trim();
+                acc.AddTest(
+                    MonthColForCardiologist(ym, cardio),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Convert.ToInt32(reader.GetValue(4)));
+            }
+        }
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT
+                    TO_CHAR(l.LETTER_DATE, 'YYYY-MM') AS YearMonth,
+                    TRIM(TO_CHAR(c.USER_LIST_RID)) AS CardiologistId,
+                    COUNT(*) AS ConsultCount
+                FROM {Schema}.CONSULT c
+                JOIN {Schema}.LETTERS l
+                  ON l.LETTERS_RID = c.LETTERS_RID
+                WHERE l.LETTER_DATE >= :DateFrom
+                  AND l.LETTER_DATE < :DateToExclusive
+                GROUP BY
+                    TO_CHAR(l.LETTER_DATE, 'YYYY-MM'),
+                    TRIM(TO_CHAR(c.USER_LIST_RID))
+                """;
+            cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom;
+            cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateToExclusive;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var ym = reader.IsDBNull(0) ? null : reader.GetString(0);
+                var cardio = reader.IsDBNull(1) ? "" : reader.GetString(1).Trim();
+                acc.AddConsult(MonthColForCardiologist(ym, cardio), Convert.ToInt32(reader.GetValue(2)));
+            }
+        }
+
+        var dccsByAppointment = new Dictionary<string, (string? YearMonth, string? CardiologistId)>(
+            StringComparer.OrdinalIgnoreCase);
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT
+                    TRIM(TO_CHAR(a.SCHEDULE_APPOINTMENT_RID)) AS AppointmentId,
+                    TO_CHAR(a.APPOINTMENT_DATE, 'YYYY-MM') AS YearMonth,
+                    TRIM(TO_CHAR(t.CARDIOLOGIST1)) AS CardiologistId
+                FROM {Schema}.SCHEDULE_APPOINTMENT a
+                JOIN {Schema}.SCHEDULE_OCC_SERVICE o
+                  ON o.SCHEDULE_OCC_SERVICE_RID = a.SCHEDULE_OCC_SERVICE_RID
+                LEFT JOIN {Schema}.TEST t
+                  ON t.PATIENT_RID = a.PATIENT_RID
+                 AND t.TEST_DATE >= TRUNC(a.APPOINTMENT_DATE)
+                 AND t.TEST_DATE < TRUNC(a.APPOINTMENT_DATE) + 1
+                 AND t.CARDIOLOGIST1 IS NOT NULL
+                 AND t.CARDIOLOGIST1 NOT IN (0, 1)
+                WHERE a.APPOINTMENT_DATE >= :DateFrom
+                  AND a.APPOINTMENT_DATE < :DateToExclusive
+                  AND o.SCHEDULE_OCC_SERVICE_RID IN ({dccsIds})
+                """;
+            cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom;
+            cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateToExclusive;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var appointmentId = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
+                if (string.IsNullOrWhiteSpace(appointmentId))
+                    continue;
+                var ym = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var cardio = reader.IsDBNull(2) ? null : reader.GetString(2).Trim();
+                if (!dccsByAppointment.TryGetValue(appointmentId, out var existing)
+                    || string.IsNullOrWhiteSpace(existing.CardiologistId))
+                {
+                    dccsByAppointment[appointmentId] = (
+                        ym,
+                        string.IsNullOrWhiteSpace(cardio) ? null : cardio);
+                }
+            }
+        }
+
+        foreach (var (ym, cardio) in dccsByAppointment.Values)
+            acc.AddDccs(MonthColForCardiologist(ym, cardio));
+
+        var columns = window.Months
+            .Select(m => new DrSummaryColumn(m.YearMonth, m.Label, m.Label))
+            .ToList();
+
+        return new DrSummaryReport(
+            year,
+            month,
+            "All doctors — prior 12 months",
+            window.From,
+            window.ToExclusive,
+            columns,
+            acc.ToRows());
+    }
+
+    private static bool IsAllDoctorsHistory(string? cardiologistId) =>
+        string.IsNullOrWhiteSpace(cardiologistId)
+        || string.Equals(
+            cardiologistId.Trim(),
+            Cm2DrSummaryMapping.AllDoctorsColumnId,
+            StringComparison.OrdinalIgnoreCase);
 
     private static string? LikeContains(string? query)
     {

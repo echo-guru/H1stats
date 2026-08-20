@@ -46,6 +46,46 @@ function rowClass(kind: SummaryRow['kind']): string {
   return 'hover:bg-muted/30'
 }
 
+const ALL_DRS_TOTAL_ID = 'all-drs-total'
+
+function withAllDoctorTotals(report: ReportResult): ReportResult {
+  return {
+    ...report,
+    columns: [
+      ...report.columns,
+      { id: ALL_DRS_TOTAL_ID, initials: 'Total', displayName: 'All doctors' },
+    ],
+    rows: report.rows.map((row) => ({
+      ...row,
+      counts: [
+        ...row.counts,
+        row.kind === 'spacer' ? 0 : row.counts.reduce((sum, n) => sum + n, 0),
+      ],
+    })),
+  }
+}
+
+function sumDoctorHistories(histories: ReportResult[]): ReportResult {
+  const base = histories[0]
+  if (!base) {
+    throw new Error('History failed')
+  }
+
+  return {
+    ...base,
+    label: 'All doctors — prior 12 months',
+    rows: base.rows.map((row, rowIndex) => ({
+      ...row,
+      counts:
+        row.kind === 'spacer'
+          ? row.counts.map(() => 0)
+          : row.counts.map((_, monthIndex) =>
+              histories.reduce((sum, history) => sum + (history.rows[rowIndex]?.counts[monthIndex] ?? 0), 0),
+            ),
+    })),
+  }
+}
+
 export default function DrSummaryCm2() {
   const [yearMonth, setYearMonth] = useState(currentYearMonth)
   const [report, setReport] = useState<ReportResult | null>(null)
@@ -95,17 +135,40 @@ export default function DrSummaryCm2() {
     setHistoryLoading(true)
     setError('')
     try {
-      const params = new URLSearchParams({
-        physician: doctor.id,
-        year: String(year),
-        month: String(month),
-      })
-      const res = await fetch(`/api/clinical/cm2/dr-summary/history?${params}`)
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.message || 'History failed')
+      if (doctor.id === ALL_DRS_TOTAL_ID) {
+        const doctors = report?.columns ?? []
+        if (doctors.length === 0) {
+          throw new Error('Run the report before opening totals history')
+        }
+        const histories = await Promise.all(
+          doctors.map(async (col) => {
+            const params = new URLSearchParams({
+              physician: col.id,
+              year: String(year),
+              month: String(month),
+            })
+            const res = await fetch(`/api/clinical/cm2/dr-summary/history?${params}`)
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.message || 'History failed')
+            }
+            return (await res.json()) as ReportResult
+          }),
+        )
+        setHistory(sumDoctorHistories(histories))
+      } else {
+        const params = new URLSearchParams({
+          physician: doctor.id,
+          year: String(year),
+          month: String(month),
+        })
+        const res = await fetch(`/api/clinical/cm2/dr-summary/history?${params}`)
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.message || 'History failed')
+        }
+        setHistory(await res.json())
       }
-      setHistory(await res.json())
       setHistoryDoctor(doctor)
       setChartView(false)
       setExpandedTrend(null)
@@ -127,9 +190,11 @@ export default function DrSummaryCm2() {
   }
 
   const activeReport = history ?? report
+  const tableReport =
+    !activeReport ? null : history ? activeReport : withAllDoctorTotals(activeReport)
 
   const exportCsv = () => {
-    const source = activeReport
+    const source = tableReport
     if (!source) return
     const header = ['OOS', ...source.columns.map((c) => c.initials)]
     const lines = [header.join(',')]
@@ -157,7 +222,7 @@ export default function DrSummaryCm2() {
       <div className="flex items-center gap-3">
         <ClipboardList className="h-8 w-8 text-brand-primary" />
         <div>
-          <h2 className="text-2xl font-semibold text-brand-accent">Dr Summary - CM2</h2>
+          <h2 className="text-2xl font-semibold text-brand-accent">H1 Dr Summary (CM2)</h2>
           <p className="text-sm text-gray-600">
             Monthly reporting activity by cardiologist and occasion of service (Oracle CM2 / Hearts1st)
           </p>
@@ -224,7 +289,7 @@ export default function DrSummaryCm2() {
             </div>
           ) : (
             <p className="text-sm text-gray-600">
-              {activeReport.label}. Click a cardiologist for a 12-month view. Echo / DSE / SE / TEE from
+              {activeReport.label}. Click a cardiologist or Total for a 12-month view. Echo / DSE / SE / TEE from
               study requested (<code>TEST_REQUIRED</code>); consults combine initial, follow-up, and
               derivatives.
             </p>
@@ -239,7 +304,7 @@ export default function DrSummaryCm2() {
 
           {chartView && !history ? (
             <div className="space-y-3">
-              <p className="text-sm text-gray-600">Echo, SE, DSE, and Consults totals for each cardiologist. Click a name for 12-month history.</p>
+              <p className="text-sm text-gray-600">Echo, SE, DSE, TEE, and Consults totals for each cardiologist. Click a name for 12-month history.</p>
               <DrSummaryPieGrid
                 doctors={buildDoctorPies(activeReport.columns, activeReport.rows)}
                 onSelectDoctor={(id) => {
@@ -249,6 +314,7 @@ export default function DrSummaryCm2() {
               />
             </div>
           ) : (
+            tableReport && (
             <div className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm border-collapse">
@@ -257,33 +323,38 @@ export default function DrSummaryCm2() {
                       <th className="text-left p-2.5 font-semibold sticky left-0 bg-brand-primary min-w-[8.5rem]">
                         OOS
                       </th>
-                      {activeReport.columns.map((c) => (
-                        <th
-                          key={c.id}
-                          className="text-right p-2.5 font-semibold min-w-[3.5rem] whitespace-nowrap"
-                          title={c.displayName}
-                        >
-                          {history ? (
-                            c.initials
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => openDoctorHistory(c)}
-                              className="hover:underline underline-offset-2"
-                            >
-                              {c.initials}
-                            </button>
-                          )}
-                        </th>
-                      ))}
+                      {tableReport.columns.map((c) => {
+                        const isTotal = c.id === ALL_DRS_TOTAL_ID
+                        return (
+                          <th
+                            key={c.id}
+                            className={`text-right p-2.5 font-semibold min-w-[3.5rem] whitespace-nowrap ${
+                              isTotal ? 'border-l border-white/30' : ''
+                            }`}
+                            title={c.displayName}
+                          >
+                            {history ? (
+                              c.initials
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openDoctorHistory(c)}
+                                className="hover:underline underline-offset-2"
+                              >
+                                {c.initials}
+                              </button>
+                            )}
+                          </th>
+                        )
+                      })}
                     </tr>
                   </thead>
                   <tbody>
-                    {activeReport.rows.map((row) => {
+                    {tableReport.rows.map((row) => {
                       if (row.kind === 'spacer') {
                         return (
                           <tr key={row.key} className="h-3 bg-white">
-                            <td colSpan={activeReport.columns.length + 1} className="p-0" />
+                            <td colSpan={tableReport.columns.length + 1} className="p-0" />
                           </tr>
                         )
                       }
@@ -321,15 +392,23 @@ export default function DrSummaryCm2() {
                                 row.label
                               )}
                             </td>
-                            {row.counts.map((n, i) => (
-                              <td key={`${row.key}-${i}`} className="p-2.5 text-right font-mono tabular-nums">
-                                {formatCount(row.kind, n)}
-                              </td>
-                            ))}
+                            {row.counts.map((n, i) => {
+                              const isTotal = tableReport.columns[i]?.id === ALL_DRS_TOTAL_ID
+                              return (
+                                <td
+                                  key={`${row.key}-${i}`}
+                                  className={`p-2.5 text-right font-mono tabular-nums ${
+                                    isTotal ? 'border-l border-brand-primary-border/60 bg-brand-primary-light font-semibold' : ''
+                                  }`}
+                                >
+                                  {formatCount(row.kind, n)}
+                                </td>
+                              )
+                            })}
                           </tr>
                           {history ? (
                             <tr className={trendOpen ? 'border-b border-brand-primary-border/60' : ''}>
-                              <td colSpan={activeReport.columns.length + 1} className="p-0">
+                              <td colSpan={tableReport.columns.length + 1} className="p-0">
                                 <div
                                   className={`grid transition-[grid-template-rows] duration-300 ease-out ${
                                     trendOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
@@ -338,7 +417,7 @@ export default function DrSummaryCm2() {
                                   <div className="overflow-hidden min-h-0">
                                     <div className="px-4 py-3 bg-gradient-to-b from-brand-primary-light/80 to-white">
                                       <MonthTotalChart
-                                        months={activeReport.columns.map((c, i) => ({
+                                        months={tableReport.columns.map((c, i) => ({
                                           yearMonth: c.id,
                                           label: c.displayName || c.initials,
                                           total: row.counts[i] ?? 0,
@@ -361,6 +440,7 @@ export default function DrSummaryCm2() {
                 </table>
               </div>
             </div>
+            )
           )}
         </div>
       )}

@@ -73,4 +73,31 @@ public static class QuarterPeriod
         current = Of(year.Value, quarter.Value);
         return true;
     }
+
+    /// <summary>
+    /// Calendar quarters that overlap an inclusive date range, oldest first.
+    /// </summary>
+    public static IReadOnlyList<(string Key, string Label, DateOnly From, DateOnly ToExclusive)> QuartersInRange(
+        DateOnly dateFrom, DateOnly dateTo)
+    {
+        if (dateFrom > dateTo)
+            throw new ArgumentException("dateFrom must be on or before dateTo.");
+
+        var startQuarter = (dateFrom.Month - 1) / 3 + 1;
+        var cursor = Of(dateFrom.Year, startQuarter);
+        var list = new List<(string Key, string Label, DateOnly From, DateOnly ToExclusive)>();
+        while (cursor.From <= dateTo)
+        {
+            list.Add((
+                $"{cursor.Year}-Q{cursor.Quarter}",
+                cursor.Label,
+                cursor.From,
+                cursor.ToExclusive));
+            cursor = cursor.Quarter == 4
+                ? Of(cursor.Year + 1, 1)
+                : Of(cursor.Year, cursor.Quarter + 1);
+        }
+
+        return list;
+    }
 }
