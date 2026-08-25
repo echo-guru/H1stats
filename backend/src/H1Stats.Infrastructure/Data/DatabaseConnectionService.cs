@@ -32,7 +32,9 @@ public class DatabaseConnectionService : IDatabaseConnectionService
                 Cm2Sid = _settings.Cm2Sid,
                 Cm2Schema = _settings.Cm2Schema,
                 Username = _settings.Username,
-                Password = string.Empty
+                Password = string.Empty,
+                Cm2ReportRoot = _settings.Cm2ReportRoot,
+                Cm2WordPath = _settings.Cm2WordPath
             };
         }
     }
@@ -89,6 +91,8 @@ public class DatabaseConnectionService : IDatabaseConnectionService
             Cm2Schema = incoming.Cm2Schema,
             Username = incoming.Username,
             Password = string.IsNullOrWhiteSpace(incoming.Password) ? _settings.Password : incoming.Password,
+            Cm2ReportRoot = string.IsNullOrWhiteSpace(incoming.Cm2ReportRoot) ? _settings.Cm2ReportRoot : incoming.Cm2ReportRoot,
+            Cm2WordPath = string.IsNullOrWhiteSpace(incoming.Cm2WordPath) ? _settings.Cm2WordPath : incoming.Cm2WordPath,
         };
 
     private static async Task<DatabaseConnectionTestResult> TestSqlAsync(

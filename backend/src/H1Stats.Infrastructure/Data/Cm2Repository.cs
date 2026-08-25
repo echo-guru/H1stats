@@ -4,6 +4,7 @@ using H1Stats.Core.Models;
 using H1Stats.Core.Services;
 using Microsoft.Extensions.Options;
 using Oracle.ManagedDataAccess.Client;
+using System.Diagnostics;
 
 namespace H1Stats.Infrastructure.Data;
 
@@ -13,9 +14,13 @@ namespace H1Stats.Infrastructure.Data;
 public class Cm2Repository : ICm2Repository
 {
     private readonly DatabaseSettings _settings;
+    private readonly IDatabaseConnectionService _db;
 
-    public Cm2Repository(IOptions<DatabaseSettings> options) =>
+    public Cm2Repository(IOptions<DatabaseSettings> options, IDatabaseConnectionService db)
+    {
         _settings = options.Value;
+        _db = db;
+    }
 
     private string Schema =>
         string.IsNullOrWhiteSpace(_settings.Cm2Schema) ? "HEARTS1ST" : _settings.Cm2Schema.Trim().ToUpperInvariant();
@@ -1017,6 +1022,198 @@ public class Cm2Repository : ICm2Repository
         return list;
     }
 
+    public async Task<PracticeDoctorsReport> GetPracticeDoctorsAsync(
+        string practiceId, string? investigationType, CancellationToken ct = default)
+    {
+        if (!TryParseEntityId(practiceId, out var idKind, out var rid) || idKind != "CM2")
+            throw new ArgumentException("Invalid id. Expected CM2:{rid}.", nameof(practiceId));
+
+        var resolved = await ResolveEntityAsync(true, idKind, rid, ct);
+        if (resolved is null)
+            throw new KeyNotFoundException("Practice not found.");
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var yearTo = today;
+        var yearFrom = today.AddYears(-1);
+        var yearMonths = new HashSet<string>(
+            MonthPeriod.MonthsInRange(yearFrom, yearTo).Select(m => m.YearMonth),
+            StringComparer.Ordinal);
+        var quarters = QuarterPeriod.LastN(20, today);
+        var quarterFrom = quarters[0].From;
+        var dateToExclusive = yearTo.AddDays(1);
+        var typeCode = Cm2InvestigationTypeMapping.ResolveReferringDoctorCode(investigationType);
+        var typeFilter = string.IsNullOrWhiteSpace(typeCode)
+            ? "AND t.TEST_REQUIRED IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)"
+            : "AND t.TEST_REQUIRED = :InvestigationType";
+
+        const string personIdSql = """
+            CASE
+                WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                     AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                     AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                WHEN d.DOCTOR_RID IS NOT NULL
+                     AND TRIM(TO_CHAR(d.DOCTOR_RID)) IS NOT NULL
+                     AND TRIM(TO_CHAR(d.DOCTOR_RID)) NOT IN ('0', '1')
+                THEN 'LEGACY:' || TRIM(TO_CHAR(d.DOCTOR_RID))
+                ELSE NULL
+            END
+            """;
+        const string doctorNameSql = """
+            CASE
+                WHEN cd.CM2_DOCTOR_RID IS NOT NULL THEN
+                    TRIM(
+                        NVL(cd.DOC_TITLE || ' ', '') ||
+                        NVL(cd.DOC_FIRSTNAME || ' ', '') ||
+                        NVL(cd.DOC_MIDDLENAME || ' ', '') ||
+                        NVL(cd.DOC_LASTNAME, '')
+                    )
+                ELSE
+                    TRIM(
+                        NVL(d.DOCTOR_TITLE || ' ', '') ||
+                        NVL(d.DOCTOR_FIRSTNAME || ' ', '') ||
+                        NVL(d.DOCTOR_LASTNAME, '')
+                    )
+            END
+            """;
+
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var activity = new List<(string DoctorId, string YearMonth, string InvestigationType, string? Ward, int Count)>();
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT PersonId, DisplayName
+                FROM (
+                    SELECT
+                        {personIdSql} AS PersonId,
+                        {doctorNameSql} AS DisplayName
+                    FROM {Schema}.DOCTOR d
+                    LEFT JOIN {Schema}.CM2_DOCTOR cd
+                      ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
+                    WHERE d.CM2_PRACTICE_RID = :Rid
+                )
+                WHERE PersonId IS NOT NULL
+                """;
+            cmd.Parameters.Add("Rid", OracleDbType.Decimal).Value = Convert.ToDecimal(rid);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var id = reader.IsDBNull(0) ? null : reader.GetString(0);
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+                var name = reader.IsDBNull(1) ? null : reader.GetString(1)?.Trim();
+                if (!string.IsNullOrWhiteSpace(name) && !names.ContainsKey(id))
+                    names[id] = name;
+                else
+                    names.TryAdd(id, id);
+            }
+        }
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT
+                    {personIdSql} AS PersonId,
+                    {doctorNameSql} AS DoctorName,
+                    TO_CHAR(t.TEST_DATE, 'YYYY-MM') AS YearMonth,
+                    NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), '') AS InvestigationTypeCode,
+                    NULLIF(TRIM(t.WARD), '') AS Ward,
+                    COUNT(DISTINCT t.TEST_RID) AS StudyCount
+                FROM {Schema}.TEST t
+                LEFT JOIN {Schema}.DOCTOR d
+                  ON d.DOCTOR_RID = t.REFERRING_DOCTOR
+                LEFT JOIN {Schema}.CM2_DOCTOR cd
+                  ON cd.CM2_DOCTOR_RID = d.CM2_DOCTOR_RID
+                WHERE t.TEST_DATE >= :DateFrom
+                  AND t.TEST_DATE < :DateToExclusive
+                  AND d.CM2_PRACTICE_RID = :Rid
+                  {typeFilter}
+                GROUP BY
+                    {personIdSql},
+                    {doctorNameSql},
+                    TO_CHAR(t.TEST_DATE, 'YYYY-MM'),
+                    NULLIF(TRIM(TO_CHAR(t.TEST_REQUIRED)), ''),
+                    NULLIF(TRIM(t.WARD), '')
+                """;
+            cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = quarterFrom.ToDateTime(TimeOnly.MinValue);
+            cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateToExclusive.ToDateTime(TimeOnly.MinValue);
+            cmd.Parameters.Add("Rid", OracleDbType.Decimal).Value = Convert.ToDecimal(rid);
+            if (!string.IsNullOrWhiteSpace(typeCode))
+                cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var id = reader.IsDBNull(0) ? null : reader.GetString(0);
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+                var name = reader.IsDBNull(1) ? null : reader.GetString(1)?.Trim();
+                var yearMonth = reader.IsDBNull(2) ? null : reader.GetString(2);
+                if (string.IsNullOrWhiteSpace(yearMonth))
+                    continue;
+                if (!string.IsNullOrWhiteSpace(name))
+                    names[id] = name;
+                else
+                    names.TryAdd(id, id);
+                var rawType = reader.IsDBNull(3) ? null : reader.GetString(3);
+                var ward = reader.IsDBNull(4) ? null : reader.GetString(4);
+                activity.Add((
+                    id,
+                    yearMonth,
+                    Cm2InvestigationTypeMapping.ResolveDisplayName(rawType),
+                    ward,
+                    Convert.ToInt32(reader.GetValue(5))));
+            }
+        }
+
+        var byDoctorMonth = activity.ToLookup(r => r.DoctorId, StringComparer.OrdinalIgnoreCase);
+        var doctors = names.Keys
+            .Select(id =>
+            {
+                var monthRows = byDoctorMonth[id].ToList();
+                var byQuarter = monthRows.ToLookup(r => YearMonthToQuarterKey(r.YearMonth), StringComparer.Ordinal);
+                var quarterRows = quarters
+                    .Select(q =>
+                    {
+                        var testRows = AggregateTestRows(
+                            byQuarter[q.Key].Select(r => (r.InvestigationType, r.Ward, r.Count)));
+                        return new PracticeDoctorQuarter(
+                            q.Key,
+                            q.Label,
+                            testRows.Sum(t => t.Total),
+                            testRows);
+                    })
+                    .ToList();
+                var yearTotal = monthRows
+                    .Where(r => yearMonths.Contains(r.YearMonth))
+                    .Sum(r => r.Count);
+                var displayName = names.TryGetValue(id, out var n) && !string.IsNullOrWhiteSpace(n) ? n : id;
+                return new PracticeDoctorRow(id, displayName, yearTotal, quarterRows);
+            })
+            .OrderByDescending(d => d.YearTotal)
+            .ThenBy(d => d.DisplayName)
+            .ToList();
+
+        return new PracticeDoctorsReport(
+            practiceId.Trim(),
+            resolved.Value.DisplayName,
+            resolved.Value.Suburb,
+            yearFrom,
+            yearTo,
+            quarterFrom,
+            yearTo,
+            doctors,
+            string.IsNullOrWhiteSpace(typeCode)
+                ? null
+                : Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode));
+    }
+
     public async Task<ReferrerHistoryReport> GetReferrerHistoryAsync(
         string mode, string entityId, string? investigationType, DateOnly dateFrom, DateOnly dateTo, string? grain = null, CancellationToken ct = default)
     {
@@ -1255,8 +1452,304 @@ public class Cm2Repository : ICm2Repository
             grainKey);
     }
 
+    public async Task<ReferrerHistoryStudiesResult> GetReferrerHistoryStudiesAsync(
+        string mode, string entityId, string investigationType, string periodKey,
+        DateOnly dateFrom, DateOnly dateTo, string? grain = null, string? doctorId = null,
+        CancellationToken ct = default)
+    {
+        var isPractice = string.Equals(mode, "practice", StringComparison.OrdinalIgnoreCase);
+        var isDoctor = string.Equals(mode, "doctor", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mode, "dr", StringComparison.OrdinalIgnoreCase);
+        if (!isPractice && !isDoctor)
+            throw new ArgumentException("mode must be doctor or practice.", nameof(mode));
+        if (dateFrom > dateTo)
+            throw new ArgumentException("dateFrom must be on or before dateTo.");
+        if (string.IsNullOrWhiteSpace(investigationType))
+            throw new ArgumentException("investigationType is required.", nameof(investigationType));
+        if (string.IsNullOrWhiteSpace(periodKey))
+            throw new ArgumentException("period is required.", nameof(periodKey));
+        if (!TryGetPeriodBounds(grain, periodKey, out var periodFrom, out var periodToExclusive, out var periodLabel))
+            throw new ArgumentException("Invalid period. Expected YYYY-MM or YYYY-Qn.", nameof(periodKey));
+
+        var modeKey = isPractice ? "practice" : "doctor";
+        if (!TryParseEntityId(entityId, out var idKind, out var rid))
+            throw new ArgumentException("Invalid id. Expected CM2:{rid} or LEGACY:{rid}.", nameof(entityId));
+        if (isPractice && idKind != "CM2")
+            throw new ArgumentException("Practice search requires a CM2 practice id.", nameof(entityId));
+
+        var typeCode = Cm2InvestigationTypeMapping.ResolveReferringDoctorCode(investigationType);
+        if (string.IsNullOrWhiteSpace(typeCode))
+            throw new ArgumentException("Unknown investigation type.", nameof(investigationType));
+
+        var from = periodFrom > dateFrom ? periodFrom : dateFrom;
+        var toExclusive = periodToExclusive < dateTo.AddDays(1) ? periodToExclusive : dateTo.AddDays(1);
+        var entityFilter = isPractice
+            ? "AND d.CM2_PRACTICE_RID = :Rid"
+            : idKind == "CM2"
+                ? "AND d.CM2_DOCTOR_RID = :Rid"
+                : "AND t.REFERRING_DOCTOR = :Rid";
+
+        string doctorFilter = "";
+        string? doctorIdKey = null;
+        if (isPractice && !string.IsNullOrWhiteSpace(doctorId))
+        {
+            doctorIdKey = doctorId.Trim();
+            doctorFilter = """
+                AND (
+                    CASE
+                        WHEN d.CM2_DOCTOR_RID IS NOT NULL
+                             AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) IS NOT NULL
+                             AND TRIM(TO_CHAR(d.CM2_DOCTOR_RID)) NOT IN ('0', '1')
+                        THEN 'CM2:' || TRIM(TO_CHAR(d.CM2_DOCTOR_RID))
+                        WHEN t.REFERRING_DOCTOR IS NOT NULL
+                             AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) IS NOT NULL
+                             AND TRIM(TO_CHAR(t.REFERRING_DOCTOR)) NOT IN ('0', '1')
+                        THEN 'LEGACY:' || TRIM(TO_CHAR(t.REFERRING_DOCTOR))
+                        ELSE 'UNKNOWN'
+                    END
+                ) = :DoctorId
+                """;
+        }
+
+        var resolved = await ResolveEntityAsync(isPractice, idKind, rid, ct);
+        if (resolved is null)
+            throw new KeyNotFoundException(isPractice ? "Practice not found." : "Doctor not found.");
+
+        var studies = new List<ReferrerHistoryStudyRow>();
+        if (from < toExclusive)
+        {
+            var sql = $"""
+                SELECT
+                    NVL(
+                        NULLIF(TRIM(TO_CHAR(p.PAT_ID)), ''),
+                        NULLIF(TRIM(TO_CHAR(p.PATIENT_RID)), '')
+                    ) AS PatientCmId,
+                    TRIM(
+                        NVL(p.PAT_TITLE || ' ', '') ||
+                        NVL(p.PAT_FIRSTNAME || ' ', '') ||
+                        NVL(p.PAT_MIDDLE_NAME || ' ', '') ||
+                        NVL(UPPER(p.PAT_LASTNAME), '')
+                    ) AS PatientName,
+                    TO_CHAR(t.TEST_DATE, 'YYYY-MM-DD') AS StudyDate,
+                    TRIM(TO_CHAR(t.TEST_RID)) AS TestRid,
+                    NULLIF(TRIM(t.REPORT_PATH), '') AS ReportPath
+                FROM {Schema}.TEST t
+                LEFT JOIN {Schema}.PATIENT p
+                  ON p.PATIENT_RID = t.PATIENT_RID
+                LEFT JOIN {Schema}.DOCTOR d
+                  ON d.DOCTOR_RID = t.REFERRING_DOCTOR
+                WHERE t.TEST_DATE >= :DateFrom
+                  AND t.TEST_DATE < :DateToExclusive
+                  AND t.TEST_REQUIRED = :InvestigationType
+                  {entityFilter}
+                  {doctorFilter}
+                ORDER BY t.TEST_DATE DESC, p.PAT_LASTNAME, p.PAT_FIRSTNAME, t.TEST_RID
+                """;
+
+            await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.BindByName = true;
+            cmd.CommandText = sql;
+            cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = from.ToDateTime(TimeOnly.MinValue);
+            cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = toExclusive.ToDateTime(TimeOnly.MinValue);
+            cmd.Parameters.Add("Rid", OracleDbType.Decimal).Value = Convert.ToDecimal(rid);
+            cmd.Parameters.Add("InvestigationType", OracleDbType.Decimal).Value = Convert.ToDecimal(typeCode);
+            if (doctorIdKey is not null)
+                cmd.Parameters.Add("DoctorId", OracleDbType.Varchar2).Value = doctorIdKey;
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var cmId = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
+                var name = reader.IsDBNull(1) ? "" : reader.GetString(1)?.Trim() ?? "";
+                var dateStr = reader.IsDBNull(2) ? null : reader.GetString(2);
+                if (string.IsNullOrWhiteSpace(dateStr) || !DateOnly.TryParse(dateStr, out var studyDate))
+                    continue;
+                var testRid = reader.IsDBNull(3) ? "" : reader.GetString(3).Trim();
+                var reportPath = reader.IsDBNull(4) ? null : reader.GetString(4);
+                var hasReport = !string.IsNullOrWhiteSpace(reportPath);
+                string? wordUri = null;
+                if (hasReport && TryBuildReportFullPath(reportPath!, out var fullPath, out _))
+                    wordUri = ToWordLaunchUri(fullPath);
+                studies.Add(new ReferrerHistoryStudyRow(
+                    cmId,
+                    string.IsNullOrWhiteSpace(name) ? "Unknown" : name,
+                    studyDate,
+                    testRid,
+                    hasReport,
+                    wordUri));
+            }
+        }
+
+        return new ReferrerHistoryStudiesResult(
+            modeKey,
+            entityId.Trim(),
+            resolved.Value.DisplayName,
+            periodKey.Trim(),
+            periodLabel,
+            Cm2InvestigationTypeMapping.ResolveDisplayName(typeCode),
+            doctorIdKey,
+            null,
+            studies);
+    }
+
+    public async Task<StudyReportFile?> GetStudyReportFileAsync(string testRid, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(testRid)
+            || !decimal.TryParse(testRid.Trim(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var rid))
+            throw new ArgumentException("Invalid study id.", nameof(testRid));
+
+        string? reportPath = null;
+        await using (var conn = new OracleConnection(_settings.Cm2OracleConnectionString))
+        {
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT NULLIF(TRIM(REPORT_PATH), '')
+                FROM {Schema}.TEST
+                WHERE TEST_RID = :Rid
+                """;
+            cmd.Parameters.Add("Rid", OracleDbType.Decimal).Value = rid;
+            var value = await cmd.ExecuteScalarAsync(ct);
+            if (value is null or DBNull)
+                return null;
+            reportPath = Convert.ToString(value)?.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(reportPath))
+            return null;
+        if (!TryBuildReportFullPath(reportPath, out var fullPath, out var error))
+            throw new InvalidOperationException(error);
+        if (!File.Exists(fullPath))
+            throw new FileNotFoundException($"Report file not found at {fullPath}.", fullPath);
+
+        var fileName = Path.GetFileName(fullPath);
+        var ext = Path.GetExtension(fullPath);
+        var contentType = ext.Equals(".rtf", StringComparison.OrdinalIgnoreCase)
+            ? "application/rtf"
+            : ext.Equals(".doc", StringComparison.OrdinalIgnoreCase)
+                ? "application/msword"
+                : "application/octet-stream";
+        return new StudyReportFile(fullPath, fileName, contentType);
+    }
+
+    public async Task OpenStudyReportAsync(string testRid, CancellationToken ct = default)
+    {
+        var file = await GetStudyReportFileAsync(testRid, ct)
+            ?? throw new FileNotFoundException("No report on file for this study.");
+
+        var word = ResolveWordExecutable();
+        ProcessStartInfo psi;
+        if (!string.IsNullOrWhiteSpace(word))
+        {
+            psi = new ProcessStartInfo
+            {
+                FileName = word,
+                Arguments = "\"" + file.FullPath + "\"",
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(word) ?? "",
+            };
+        }
+        else
+        {
+            psi = new ProcessStartInfo
+            {
+                FileName = file.FullPath,
+                UseShellExecute = true,
+            };
+        }
+
+        var proc = Process.Start(psi);
+        if (proc is null && !string.IsNullOrWhiteSpace(word))
+            throw new InvalidOperationException("Windows did not start Word. Check Database:Cm2WordPath.");
+    }
+
+    private string? ResolveWordExecutable()
+    {
+        var configured = _db.GetSettings().Cm2WordPath?.Trim();
+        if (string.IsNullOrWhiteSpace(configured))
+            configured = _settings.Cm2WordPath?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+            return configured;
+
+        string[] candidates =
+        [
+            @"C:\Program Files (x86)\Microsoft Office\OFFICE11\Winword.exe",
+            @"C:\Program Files\Microsoft Office\OFFICE11\Winword.exe",
+            @"C:\Program Files (x86)\Microsoft Office\Office14\WINWORD.EXE",
+            @"C:\Program Files\Microsoft Office\Office16\WINWORD.EXE",
+            @"C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE",
+            @"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        ];
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private bool TryBuildReportFullPath(string reportPath, out string fullPath, out string error)
+    {
+        fullPath = "";
+        var root = _db.GetSettings().Cm2ReportRoot?.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            root = _settings.Cm2ReportRoot?.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            error = "CM2 report folder is not configured (Database:Cm2ReportRoot). Set it to the CM2 mapped drive, typically T:\\.";
+            return false;
+        }
+
+        var relative = reportPath.Replace('/', '\\').Trim().TrimStart('\\');
+        if (string.IsNullOrWhiteSpace(relative)
+            || relative.Contains("..", StringComparison.Ordinal)
+            || Path.IsPathRooted(relative) && relative.Contains(':'))
+        {
+            error = "Invalid report path.";
+            return false;
+        }
+
+        var rootFull = Path.GetFullPath(root.TrimEnd('\\', '/') + Path.DirectorySeparatorChar);
+        var combined = Path.GetFullPath(Path.Combine(rootFull, relative));
+        if (!combined.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Invalid report path.";
+            return false;
+        }
+
+        fullPath = combined;
+        error = "";
+        return true;
+    }
+
+    private static string? ToWordLaunchUri(string fullPath)
+    {
+        try
+        {
+            var normalised = fullPath.Replace('/', '\\').Trim();
+            string fileUri;
+            if (normalised.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                fileUri = "file:" + normalised.Replace('\\', '/');
+            }
+            else
+            {
+                fileUri = "file:///" + normalised.Replace('\\', '/');
+            }
+
+            return "ms-word:ofe|u|" + new Uri(fileUri).AbsoluteUri;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static List<ReferrerHistoryTestRow> AggregateTestRows(
         IEnumerable<(string YearMonth, string InvestigationType, string? Ward, string? PracticeName, string DoctorId, string DoctorName, int Count)> rows) =>
+        AggregateTestRows(rows.Select(r => (r.InvestigationType, r.Ward, r.Count)));
+
+    private static List<ReferrerHistoryTestRow> AggregateTestRows(
+        IEnumerable<(string InvestigationType, string? Ward, int Count)> rows) =>
         rows
             .GroupBy(r => r.InvestigationType)
             .Select(tg =>
@@ -1329,6 +1822,46 @@ public class Cm2Repository : ICm2Repository
         if (string.IsNullOrWhiteSpace(name))
             name = isPractice ? "Unnamed Practice" : "Unknown";
         return (name, string.IsNullOrWhiteSpace(suburb) ? null : suburb);
+    }
+
+    private static bool TryGetPeriodBounds(
+        string? grain, string periodKey, out DateOnly from, out DateOnly toExclusive, out string label)
+    {
+        from = default;
+        toExclusive = default;
+        label = periodKey;
+        var key = periodKey.Trim();
+        var quarterly = string.Equals(grain?.Trim(), "quarter", StringComparison.OrdinalIgnoreCase);
+        if (quarterly)
+        {
+            var qIndex = key.IndexOf("-Q", StringComparison.OrdinalIgnoreCase);
+            if (qIndex > 0
+                && int.TryParse(key[..qIndex], out var year)
+                && int.TryParse(key[(qIndex + 2)..], out var quarter)
+                && quarter is >= 1 and <= 4)
+            {
+                var q = QuarterPeriod.Of(year, quarter);
+                from = q.From;
+                toExclusive = q.ToExclusive;
+                label = q.Label;
+                return true;
+            }
+            return false;
+        }
+
+        if (key.Length == 7 && key[4] == '-'
+            && int.TryParse(key.AsSpan(0, 4), out var y)
+            && int.TryParse(key.AsSpan(5, 2), out var m)
+            && m is >= 1 and <= 12)
+        {
+            var period = MonthPeriod.Of(y, m);
+            from = period.From;
+            toExclusive = period.ToExclusive;
+            label = period.Label;
+            return true;
+        }
+
+        return false;
     }
 
     private static string YearMonthToQuarterKey(string yearMonth)
@@ -1858,5 +2391,297 @@ public class Cm2Repository : ICm2Repository
         if (!string.IsNullOrWhiteSpace(siteCode))
             cmd.Parameters.Add("Site", OracleDbType.Decimal).Value = Convert.ToDecimal(siteCode);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Mirrors GPH_patList_importer outlookScheduleService.getUpcomingSchedule,
+    /// filtered to Initial / Follow-up consult service titles (consultServiceTitleMatch).
+    /// Cardiologist is PATIENT.PAT_CARDIOLOGIST, not same-day TEST.
+    /// </remarks>
+    public async Task<ResearchUpcomingConsultsResult> GetUpcomingConsultsAsync(
+        DateOnly dateFrom, DateOnly dateTo, string? cardiologistId = null, CancellationToken ct = default)
+    {
+        if (dateTo < dateFrom)
+            (dateFrom, dateTo) = (dateTo, dateFrom);
+
+        var oracleCardioId = Cm2CardiologistMapping.ResolveOracleId(cardiologistId);
+        var cardioFilter = string.IsNullOrWhiteSpace(oracleCardioId)
+            || Cm2CardiologistMapping.IsUndefinedId(oracleCardioId)
+            ? string.Empty
+            : "AND P.PAT_CARDIOLOGIST = :CardiologistId";
+
+        // Same title patterns as GPH SMS "Initial & Follow-up consult only".
+        var sql = $"""
+            SELECT
+                TRIM(TO_CHAR(A.SCHEDULE_APPOINTMENT_RID)) AS AppointmentId,
+                NVL(NULLIF(TRIM(TO_CHAR(P.PAT_ID)), ''), NULLIF(TRIM(TO_CHAR(P.PATIENT_RID)), '')) AS PatientCmId,
+                P.PAT_FIRSTNAME,
+                P.PAT_LASTNAME,
+                A.APPOINTMENT_DATE,
+                A.APPOINTMENT_TIME,
+                TRIM(NVL(S.OCC_SERVICE_TITLE, '')) AS ServiceTitle,
+                TRIM(NVL(ST.SITE_NAME, '')) AS SiteName,
+                TRIM(TO_CHAR(P.PAT_CARDIOLOGIST)) AS CardiologistId,
+                TRIM(NVL(A.APPOINTMENT_NOTE, '')) AS AppointmentNote
+            FROM {Schema}.SCHEDULE_APPOINTMENT A
+            JOIN {Schema}.PATIENT P
+              ON P.PATIENT_RID = A.PATIENT_RID
+            LEFT JOIN {Schema}.SCHEDULE_OCC_SERVICE S
+              ON S.SCHEDULE_OCC_SERVICE_RID = A.SCHEDULE_OCC_SERVICE_RID
+            LEFT JOIN {Schema}.SCHEDULE_ROOM R
+              ON R.SCHEDULE_ROOM_RID = A.SCHEDULE_ROOM_RID
+            LEFT JOIN {Schema}.SCHEDULE_SITE ST
+              ON ST.SCHEDULE_SITE_RID = R.SCHEDULE_SITE_RID
+            WHERE A.APPOINTMENT_DATE >= :DateFrom
+              AND A.APPOINTMENT_DATE < :DateToExclusive
+              AND UPPER(TRIM(NVL(P.PAT_FIRSTNAME, ' '))) <> 'AADMIN'
+              AND (
+                    -- Same consult titles as GPH SMS consultServiceTitleMatch (Oracle has no JS \s)
+                    REGEXP_LIKE(UPPER(NVL(S.OCC_SERVICE_TITLE, '')), 'INITIAL[[:space:]-]*CONSULT')
+                 OR REGEXP_LIKE(UPPER(NVL(S.OCC_SERVICE_TITLE, '')), 'FOLLOW[[:space:]-]*UP[[:space:]-]*CONSULT')
+                 OR REGEXP_LIKE(UPPER(NVL(S.OCC_SERVICE_TITLE, '')), 'FOLLOW[[:space:]-]*UP[[:space:]-]*-[[:space:]-]*NEW[[:space:]-]*REFERRAL')
+                 OR UPPER(NVL(S.OCC_SERVICE_TITLE, '')) LIKE '%CONSULT%'
+                 OR UPPER(NVL(S.OCC_SERVICE_TITLE, '')) LIKE '%NEW REFERRAL%'
+                  )
+              {cardioFilter}
+            ORDER BY A.APPOINTMENT_DATE, A.APPOINTMENT_TIME, P.PAT_ID, A.SCHEDULE_APPOINTMENT_RID
+            """;
+
+        var rows = new List<ResearchUpcomingConsult>();
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFrom.ToDateTime(TimeOnly.MinValue);
+        cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value =
+            dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        if (!string.IsNullOrWhiteSpace(cardioFilter))
+            cmd.Parameters.Add("CardiologistId", OracleDbType.Decimal).Value =
+                Convert.ToDecimal(oracleCardioId);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var appointmentId = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
+            if (string.IsNullOrWhiteSpace(appointmentId))
+                continue;
+
+            var patientCmId = reader.IsDBNull(1) ? "" : reader.GetString(1).Trim();
+            var firstName = reader.IsDBNull(2) ? "" : reader.GetString(2).Trim();
+            var lastName = reader.IsDBNull(3) ? "" : reader.GetString(3).Trim();
+            firstName = StripLeadingSalutation(firstName);
+            var patientName = FormatPatientName(lastName, firstName);
+
+            var appointmentDateRaw = reader.IsDBNull(4) ? null : reader.GetValue(4);
+            var appointmentDate = ReadDateOnly(appointmentDateRaw) ?? dateFrom;
+            var appointmentTime = FormatAppointmentTime(reader.IsDBNull(5) ? null : reader.GetValue(5))
+                ?? FormatAppointmentTimeFromDate(appointmentDateRaw);
+            var serviceTitle = reader.IsDBNull(6) ? "" : reader.GetString(6).Trim();
+            var siteRaw = reader.IsDBNull(7) ? null : reader.GetString(7).Trim();
+            var siteName = string.IsNullOrWhiteSpace(siteRaw) ? null : siteRaw;
+
+            var cardioRaw = reader.IsDBNull(8) ? null : reader.GetString(8).Trim();
+            var cardioId = Cm2CardiologistMapping.NormalizeId(cardioRaw);
+            if (string.IsNullOrWhiteSpace(cardioId)
+                || Cm2CardiologistMapping.IsUndefinedId(cardioId)
+                || cardioId == "0")
+            {
+                cardioId = "";
+            }
+
+            var cardioName = string.IsNullOrWhiteSpace(cardioId)
+                ? null
+                : Cm2CardiologistMapping.ResolveDisplayName(cardioId);
+
+            var note = reader.IsDBNull(9) ? null : reader.GetString(9).Trim();
+            if (string.IsNullOrWhiteSpace(note))
+                note = null;
+
+            rows.Add(new ResearchUpcomingConsult(
+                appointmentId,
+                patientCmId,
+                patientName,
+                appointmentDate,
+                appointmentTime,
+                serviceTitle,
+                siteName,
+                string.IsNullOrWhiteSpace(cardioId) ? null : cardioId,
+                cardioName,
+                note,
+                ResearchWorklistStatus.NotAssessed));
+        }
+
+        return new ResearchUpcomingConsultsResult(
+            dateFrom,
+            dateTo,
+            string.IsNullOrWhiteSpace(cardioFilter) ? null : oracleCardioId,
+            rows.Count,
+            rows);
+    }
+
+    public async Task<ResearchUpcomingConsult?> GetUpcomingConsultByIdAsync(
+        string appointmentId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(appointmentId)
+            || !decimal.TryParse(appointmentId.Trim(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var rid))
+            return null;
+
+        var sql = $"""
+            SELECT
+                TRIM(TO_CHAR(A.SCHEDULE_APPOINTMENT_RID)) AS AppointmentId,
+                NVL(NULLIF(TRIM(TO_CHAR(P.PAT_ID)), ''), NULLIF(TRIM(TO_CHAR(P.PATIENT_RID)), '')) AS PatientCmId,
+                P.PAT_FIRSTNAME,
+                P.PAT_LASTNAME,
+                A.APPOINTMENT_DATE,
+                A.APPOINTMENT_TIME,
+                TRIM(NVL(S.OCC_SERVICE_TITLE, '')) AS ServiceTitle,
+                TRIM(NVL(ST.SITE_NAME, '')) AS SiteName,
+                TRIM(TO_CHAR(P.PAT_CARDIOLOGIST)) AS CardiologistId,
+                TRIM(NVL(A.APPOINTMENT_NOTE, '')) AS AppointmentNote
+            FROM {Schema}.SCHEDULE_APPOINTMENT A
+            JOIN {Schema}.PATIENT P
+              ON P.PATIENT_RID = A.PATIENT_RID
+            LEFT JOIN {Schema}.SCHEDULE_OCC_SERVICE S
+              ON S.SCHEDULE_OCC_SERVICE_RID = A.SCHEDULE_OCC_SERVICE_RID
+            LEFT JOIN {Schema}.SCHEDULE_ROOM R
+              ON R.SCHEDULE_ROOM_RID = A.SCHEDULE_ROOM_RID
+            LEFT JOIN {Schema}.SCHEDULE_SITE ST
+              ON ST.SCHEDULE_SITE_RID = R.SCHEDULE_SITE_RID
+            WHERE A.SCHEDULE_APPOINTMENT_RID = :AppointmentRid
+            """;
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("AppointmentRid", OracleDbType.Decimal).Value = rid;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        var id = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
+        if (string.IsNullOrWhiteSpace(id))
+            return null;
+
+        var patientCmId = reader.IsDBNull(1) ? "" : reader.GetString(1).Trim();
+        var firstName = StripLeadingSalutation(reader.IsDBNull(2) ? "" : reader.GetString(2).Trim());
+        var lastName = reader.IsDBNull(3) ? "" : reader.GetString(3).Trim();
+        var appointmentDateRaw = reader.IsDBNull(4) ? null : reader.GetValue(4);
+        var appointmentDate = ReadDateOnly(appointmentDateRaw) ?? DateOnly.FromDateTime(DateTime.Today);
+        var appointmentTime = FormatAppointmentTime(reader.IsDBNull(5) ? null : reader.GetValue(5))
+            ?? FormatAppointmentTimeFromDate(appointmentDateRaw);
+        var serviceTitle = reader.IsDBNull(6) ? "" : reader.GetString(6).Trim();
+        var siteRaw = reader.IsDBNull(7) ? null : reader.GetString(7).Trim();
+        var cardioRaw = reader.IsDBNull(8) ? null : reader.GetString(8).Trim();
+        var cardioId = Cm2CardiologistMapping.NormalizeId(cardioRaw);
+        if (string.IsNullOrWhiteSpace(cardioId)
+            || Cm2CardiologistMapping.IsUndefinedId(cardioId)
+            || cardioId == "0")
+            cardioId = "";
+        var note = reader.IsDBNull(9) ? null : reader.GetString(9).Trim();
+        if (string.IsNullOrWhiteSpace(note))
+            note = null;
+
+        return new ResearchUpcomingConsult(
+            id,
+            patientCmId,
+            FormatPatientName(lastName, firstName),
+            appointmentDate,
+            appointmentTime,
+            serviceTitle,
+            string.IsNullOrWhiteSpace(siteRaw) ? null : siteRaw,
+            string.IsNullOrWhiteSpace(cardioId) ? null : cardioId,
+            string.IsNullOrWhiteSpace(cardioId) ? null : Cm2CardiologistMapping.ResolveDisplayName(cardioId),
+            note,
+            ResearchWorklistStatus.NotAssessed);
+    }
+
+    private static string StripLeadingSalutation(string firstName)
+    {
+        var s = firstName.Trim();
+        for (var i = 0; i < 5; i++)
+        {
+            var next = System.Text.RegularExpressions.Regex.Replace(
+                s, @"^(?:Mr|Mrs|Ms|Miss|Dr|Prof)\.?\s+", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (next == s)
+                break;
+            s = next.Trim();
+        }
+        return s;
+    }
+
+    private static string FormatPatientName(string lastName, string firstName)
+    {
+        if (!string.IsNullOrWhiteSpace(lastName) && !string.IsNullOrWhiteSpace(firstName))
+            return $"{lastName}, {firstName}";
+        if (!string.IsNullOrWhiteSpace(lastName))
+            return lastName;
+        if (!string.IsNullOrWhiteSpace(firstName))
+            return firstName;
+        return "—";
+    }
+
+    private static DateOnly? ReadDateOnly(object? value)
+    {
+        if (value is null or DBNull)
+            return null;
+        if (value is DateTime dt)
+            return DateOnly.FromDateTime(dt);
+        if (value is DateTimeOffset dto)
+            return DateOnly.FromDateTime(dto.DateTime);
+        if (DateTime.TryParse(Convert.ToString(value), out var parsed))
+            return DateOnly.FromDateTime(parsed);
+        return null;
+    }
+
+    /// <summary>Formats CM2 APPOINTMENT_TIME (often HHMM number/string) as HH:mm.</summary>
+    private static string? FormatAppointmentTime(object? value)
+    {
+        if (value is null or DBNull)
+            return null;
+
+        if (value is DateTime dt)
+        {
+            if (dt.Hour == 0 && dt.Minute == 0)
+                return null;
+            return $"{dt.Hour:D2}:{dt.Minute:D2}";
+        }
+
+        string digits;
+        if (value is decimal or int or long or short or double or float)
+        {
+            var n = Convert.ToInt32(Convert.ToDecimal(value));
+            if (n <= 0)
+                return null;
+            digits = n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            var raw = Convert.ToString(value)?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+            digits = System.Text.RegularExpressions.Regex.Replace(raw, @"\D", "");
+        }
+
+        if (string.IsNullOrWhiteSpace(digits) || digits == "0" || digits == "0000")
+            return null;
+        digits = digits.PadLeft(4, '0');
+        if (digits.Length > 4)
+            digits = digits[^4..];
+        var hour = int.Parse(digits[..2], System.Globalization.CultureInfo.InvariantCulture);
+        var minute = int.Parse(digits[2..], System.Globalization.CultureInfo.InvariantCulture);
+        if (hour is < 0 or > 23 || minute is < 0 or > 59)
+            return null;
+        return $"{hour:D2}:{minute:D2}";
+    }
+
+    private static string? FormatAppointmentTimeFromDate(object? value) =>
+        value is DateTime dt && (dt.Hour != 0 || dt.Minute != 0)
+            ? $"{dt.Hour:D2}:{dt.Minute:D2}"
+            : null;
 }
 

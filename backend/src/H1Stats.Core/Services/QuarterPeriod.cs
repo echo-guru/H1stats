@@ -100,4 +100,30 @@ public static class QuarterPeriod
 
         return list;
     }
+
+    /// <summary>
+    /// The current calendar quarter plus the previous <paramref name="n"/> − 1 quarters, oldest first.
+    /// </summary>
+    public static IReadOnlyList<(string Key, string Label, DateOnly From, DateOnly ToExclusive)> LastN(
+        int n, DateOnly? asOf = null)
+    {
+        if (n < 1)
+            throw new ArgumentOutOfRangeException(nameof(n), "n must be at least 1.");
+
+        var today = asOf ?? DateOnly.FromDateTime(DateTime.Today);
+        var cursor = Of(today.Year, (today.Month - 1) / 3 + 1);
+        var list = new List<(string Key, string Label, DateOnly From, DateOnly ToExclusive)>(n);
+        for (var i = 0; i < n; i++)
+        {
+            list.Add((
+                $"{cursor.Year}-Q{cursor.Quarter}",
+                cursor.Label,
+                cursor.From,
+                cursor.ToExclusive));
+            cursor = Previous(cursor.Year, cursor.Quarter);
+        }
+
+        list.Reverse();
+        return list;
+    }
 }

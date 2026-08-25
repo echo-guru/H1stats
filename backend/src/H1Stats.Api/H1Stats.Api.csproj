@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>H1Stats.Api</RootNamespace>
+    <UserSecretsId>h1stats-api</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

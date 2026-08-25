@@ -46,6 +46,7 @@ public class AuthService : IAuthService, IUserAdminService
         return Task.FromResult<LoginResponse?>(new LoginResponse(
             user.Username,
             user.IsAdmin,
+            user.IsSuperAdmin,
             user.Modules,
             token
         ));
@@ -182,6 +183,7 @@ public class AuthService : IAuthService, IUserAdminService
                 Modules = ModulesForRole(isAdmin),
                 PasswordHash = passwordHash,
                 FavoriteReportPaths = current.FavoriteReportPaths,
+                IsSuperAdmin = current.IsSuperAdmin,
             };
 
             _users[index] = updated;
@@ -280,7 +282,8 @@ public class AuthService : IAuthService, IUserAdminService
             PasswordHasher.Hash("tony"),
             IsAdmin: true,
             IsDisabled: false,
-            Modules: ModulesForRole(isAdmin: true)
+            Modules: ModulesForRole(isAdmin: true),
+            IsSuperAdmin: true
         ),
     ];
 
@@ -290,6 +293,7 @@ public class AuthService : IAuthService, IUserAdminService
         PasswordHash = user.PasswordHash,
         IsAdmin = user.IsAdmin,
         IsDisabled = user.IsDisabled,
+        IsSuperAdmin = user.IsSuperAdmin,
         Modules = user.Modules.ToList(),
         FailedLoginAttempts = user.FailedLoginAttempts,
         LockedUntil = user.LockedUntil,
@@ -304,7 +308,8 @@ public class AuthService : IAuthService, IUserAdminService
         user.Modules.Count > 0 ? user.Modules : ModulesForRole(user.IsAdmin),
         user.FailedLoginAttempts,
         user.LockedUntil,
-        NormalizeFavorites(user.FavoriteReportPaths)
+        NormalizeFavorites(user.FavoriteReportPaths),
+        user.IsSuperAdmin
     );
 
     private static IReadOnlyList<string> NormalizeFavorites(IEnumerable<string>? paths) =>
@@ -324,6 +329,7 @@ public class AuthService : IAuthService, IUserAdminService
         public string PasswordHash { get; set; } = "";
         public bool IsAdmin { get; set; }
         public bool IsDisabled { get; set; }
+        public bool IsSuperAdmin { get; set; }
         public List<string> Modules { get; set; } = [];
         public int FailedLoginAttempts { get; set; }
         public DateTime? LockedUntil { get; set; }

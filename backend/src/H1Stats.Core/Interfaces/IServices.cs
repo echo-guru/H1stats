@@ -47,11 +47,26 @@ public interface ICm2Repository
         int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, string? site, CancellationToken ct = default);
     Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringDoctorsAsync(string query, CancellationToken ct = default);
     Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringPracticesAsync(string query, CancellationToken ct = default);
+    Task<PracticeDoctorsReport> GetPracticeDoctorsAsync(
+        string practiceId, string? investigationType, CancellationToken ct = default);
     Task<ReferrerHistoryReport> GetReferrerHistoryAsync(
         string mode, string entityId, string? investigationType, DateOnly dateFrom, DateOnly dateTo, string? grain = null, CancellationToken ct = default);
+    Task<ReferrerHistoryStudiesResult> GetReferrerHistoryStudiesAsync(
+        string mode, string entityId, string investigationType, string periodKey,
+        DateOnly dateFrom, DateOnly dateTo, string? grain = null, string? doctorId = null,
+        CancellationToken ct = default);
+    Task<StudyReportFile?> GetStudyReportFileAsync(string testRid, CancellationToken ct = default);
+    Task OpenStudyReportAsync(string testRid, CancellationToken ct = default);
     Task<DrSummaryReport> GetDrSummaryAsync(int year, int month, CancellationToken ct = default);
     Task<DrSummaryReport> GetDrSummaryHistoryAsync(
         string? cardiologistId, int year, int month, CancellationToken ct = default);
+    /// <summary>
+    /// Upcoming Initial / Follow-up consult diary bookings (SMS module pattern).
+    /// </summary>
+    Task<ResearchUpcomingConsultsResult> GetUpcomingConsultsAsync(
+        DateOnly dateFrom, DateOnly dateTo, string? cardiologistId = null, CancellationToken ct = default);
+    Task<ResearchUpcomingConsult?> GetUpcomingConsultByIdAsync(
+        string appointmentId, CancellationToken ct = default);
 }
 
 public interface IDatabaseConnectionService
@@ -61,4 +76,45 @@ public interface IDatabaseConnectionService
     Task<ConnectionTestResult> TestConnectionAsync(DatabaseSettings? settings = null, CancellationToken ct = default);
     Task<IReadOnlyList<DatabaseConnectionTestResult>> TestAllConnectionsAsync(
         DatabaseSettings? settings = null, CancellationToken ct = default);
+}
+
+/// <summary>Server-side client for the local research LLM. The browser never sees the API key.</summary>
+public interface IResearchLlmClient
+{
+    Task<ResearchLlmStatus> GetStatusAsync(CancellationToken ct = default);
+    Task<ResearchLlmChatResult> CompleteChatAsync(
+        IReadOnlyList<ResearchLlmChatMessage> messages,
+        string? modelId = null,
+        CancellationToken ct = default);
+}
+
+/// <summary>Screens synthetic notes or a dummy RTF against active studies via the local LLM.</summary>
+public interface IResearchScreeningService
+{
+    SyntheticResearchPatient GetSyntheticPatient();
+    DummyRtfPreview GetDummyRtfPreview();
+    Task<SyntheticScreeningResult> ScreenSyntheticPatientAsync(CancellationToken ct = default);
+    Task<SyntheticScreeningResult> ScreenDummyRtfAsync(CancellationToken ct = default);
+    Task<ResearchAppointmentScreeningResult> ScreenAppointmentAsync(
+        string appointmentId, ScreenAppointmentRequest? request = null, CancellationToken ct = default);
+}
+
+/// <summary>Persisted appointment screening results (JSON file until a DB is warranted).</summary>
+public interface IResearchScreeningResultStore
+{
+    Task<ResearchAppointmentScreeningResult?> GetAsync(string appointmentId, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<string, ResearchAppointmentScreeningResult>> GetManyAsync(
+        IEnumerable<string> appointmentIds, CancellationToken ct = default);
+    Task UpsertAsync(ResearchAppointmentScreeningResult result, CancellationToken ct = default);
+    Task<(bool Deleted, string? Error)> DeleteAsync(string appointmentId, CancellationToken ct = default);
+}
+
+/// <summary>Persisted research studies. Screening later runs a patient against all active studies.</summary>
+public interface IResearchStudyStore
+{
+    Task<IReadOnlyList<ResearchStudy>> ListAsync(CancellationToken ct = default);
+    Task<ResearchStudy?> GetAsync(string id, CancellationToken ct = default);
+    Task<(ResearchStudy? Study, string? Error)> CreateAsync(SaveResearchStudyRequest request, CancellationToken ct = default);
+    Task<(ResearchStudy? Study, string? Error)> UpdateAsync(string id, SaveResearchStudyRequest request, CancellationToken ct = default);
+    Task<(bool Deleted, string? Error)> DeleteAsync(string id, CancellationToken ct = default);
 }

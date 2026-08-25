@@ -209,6 +209,76 @@ public class ClinicalController : ControllerBase
         }
     }
 
+    [HttpGet("cm2/practice-doctors")]
+    public async Task<IActionResult> GetPracticeDoctors(
+        [FromQuery] string? id,
+        [FromQuery] string? investigationType,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return BadRequest(new { message = "id is required" });
+
+        try
+        {
+            return Ok(await _cm2.GetPracticeDoctorsAsync(id, investigationType, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/referrer-history/studies")]
+    public async Task<IActionResult> GetReferrerHistoryStudies(
+        [FromQuery] string? mode,
+        [FromQuery] string? id,
+        [FromQuery] string? investigationType,
+        [FromQuery] string? period,
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] string? grain,
+        [FromQuery] string? doctorId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return BadRequest(new { message = "mode is required (doctor or practice)" });
+        if (string.IsNullOrWhiteSpace(id))
+            return BadRequest(new { message = "id is required" });
+        if (string.IsNullOrWhiteSpace(investigationType))
+            return BadRequest(new { message = "investigationType is required" });
+        if (string.IsNullOrWhiteSpace(period))
+            return BadRequest(new { message = "period is required" });
+        if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var result = await _cm2.GetReferrerHistoryStudiesAsync(
+                mode, id, investigationType, period, from, to, grain, doctorId, ct);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpGet("cm2/referrer-history")]
     public async Task<IActionResult> GetReferrerHistory(
         [FromQuery] string? mode,
@@ -238,6 +308,61 @@ public class ClinicalController : ControllerBase
         catch (KeyNotFoundException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/studies/{testRid}/report")]
+    public async Task<IActionResult> GetStudyReport(string testRid, CancellationToken ct)
+    {
+        try
+        {
+            var file = await _cm2.GetStudyReportFileAsync(testRid, ct);
+            if (file is null)
+                return NotFound(new { message = "No report on file for this study" });
+            Response.Headers.ContentDisposition = $"inline; filename=\"{file.FileName}\"";
+            return PhysicalFile(file.FullPath, file.ContentType);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(503, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("cm2/studies/{testRid}/open-report")]
+    public async Task<IActionResult> OpenStudyReport(string testRid, CancellationToken ct)
+    {
+        try
+        {
+            await _cm2.OpenStudyReportAsync(testRid, ct);
+            return Ok(new { opened = true });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(503, new { message = ex.Message });
         }
         catch (Exception ex)
         {

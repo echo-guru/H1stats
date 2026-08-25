@@ -18,6 +18,8 @@ import AdminUsers from './pages/AdminUsers'
 import AdminDatabase from './pages/AdminDatabase'
 import AdminVersionHistory from './pages/AdminVersionHistory'
 import SystemHealth from './pages/SystemHealth'
+import ResearchHome from './pages/ResearchHome'
+import ResearchStudyEditor from './pages/ResearchStudyEditor'
 
 function App() {
   return (
@@ -39,6 +41,9 @@ function App() {
               <Route path="/clinical/referrers-growth-cm2" element={<ReferrersGrowthCm2 />} />
               <Route path="/clinical/referrers-decline-cm2" element={<ReferrersDeclineCm2 />} />
               <Route path="/clinical/referrer-history-cm2" element={<ReferrerHistoryCm2 />} />
+              <Route path="/research" element={<ResearchHome />} />
+              <Route path="/research/studies/new" element={<ResearchStudyEditor />} />
+              <Route path="/research/studies/:id" element={<ResearchStudyEditor />} />
               <Route path="/admin" element={<AdminHome />} />
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/database" element={<AdminDatabase />} />

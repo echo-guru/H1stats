@@ -19,12 +19,13 @@ public record UserAccount(
     IReadOnlyList<string> Modules,
     int FailedLoginAttempts = 0,
     DateTime? LockedUntil = null,
-    IReadOnlyList<string>? FavoriteReportPaths = null
+    IReadOnlyList<string>? FavoriteReportPaths = null,
+    bool IsSuperAdmin = false
 );
 
 public record LoginRequest(string Username, string Password);
 
-public record LoginResponse(string Username, bool IsAdmin, IReadOnlyList<string> Modules, string? Token);
+public record LoginResponse(string Username, bool IsAdmin, bool IsSuperAdmin, IReadOnlyList<string> Modules, string? Token);
 
 public record UserDto(string Username, bool IsAdmin, bool IsDisabled);
 
@@ -191,6 +192,29 @@ public record ReferrerSearchHit(
     string DisplayName,
     string? SecondaryText = null);
 
+public record PracticeDoctorQuarter(
+    string Key,
+    string Label,
+    int Total,
+    IReadOnlyList<ReferrerHistoryTestRow> TestRows);
+
+public record PracticeDoctorRow(
+    string DoctorId,
+    string DisplayName,
+    int YearTotal,
+    IReadOnlyList<PracticeDoctorQuarter> Quarters);
+
+public record PracticeDoctorsReport(
+    string PracticeId,
+    string DisplayName,
+    string? Suburb,
+    DateOnly YearFrom,
+    DateOnly YearTo,
+    DateOnly QuarterFrom,
+    DateOnly QuarterTo,
+    IReadOnlyList<PracticeDoctorRow> Doctors,
+    string? InvestigationTypeFilter = null);
+
 public record ReferrerHistoryTestRow(
     string InvestigationType,
     int Total,
@@ -245,6 +269,27 @@ public record ReferrerHistoryReport(
     string? InvestigationTypeFilter = null,
     string Grain = "month");
 
+public record ReferrerHistoryStudyRow(
+    string PatientCmId,
+    string PatientName,
+    DateOnly StudyDate,
+    string TestRid,
+    bool HasReport,
+    string? WordUri = null);
+
+public record ReferrerHistoryStudiesResult(
+    string Mode,
+    string EntityId,
+    string DisplayName,
+    string PeriodKey,
+    string PeriodLabel,
+    string InvestigationType,
+    string? DoctorId,
+    string? DoctorName,
+    IReadOnlyList<ReferrerHistoryStudyRow> Studies);
+
+public record StudyReportFile(string FullPath, string FileName, string ContentType);
+
 public record ConnectionTestResult(bool Connected, string Message, DateTime? TestedAt = null);
 
 public record DatabaseConnectionTestResult(
@@ -258,4 +303,13 @@ public record HealthResponse(
     string Version,
     ConnectionTestResult SqlServer,
     string Uptime
+);
+
+/// <summary>Local LLM reachability. Never includes the API key.</summary>
+public record ResearchLlmStatus(
+    bool Online,
+    string Label,
+    string? ModelId,
+    int ContextSize,
+    string Message
 );

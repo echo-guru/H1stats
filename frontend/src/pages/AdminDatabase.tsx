@@ -12,6 +12,8 @@ interface DbConfig {
   acusonDatabase: string
   username: string
   password?: string
+  cm2ReportRoot: string
+  cm2WordPath: string
 }
 
 interface DatabaseTestResult {
@@ -35,6 +37,8 @@ export default function AdminDatabase() {
     acusonDatabase: 'AcusonDB',
     username: 'h1stats',
     password: '',
+    cm2ReportRoot: 'T:\\',
+    cm2WordPath: 'C:\\Program Files (x86)\\Microsoft Office\\OFFICE11\\Winword.exe',
   })
   const [status, setStatus] = useState<ConnectionStatus | null>(null)
   const [testing, setTesting] = useState(false)
@@ -171,6 +175,31 @@ export default function AdminDatabase() {
               placeholder="CM19"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Report folder</label>
+            <input
+              value={config.cm2ReportRoot}
+              onChange={(e) => setConfig({ ...config, cm2ReportRoot: e.target.value })}
+              placeholder="T:\"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              CM2 stores relative paths such as \reports\ttx_echo\…. This is the mapped drive from CM2 config
+              (<code>mapped_drive</code>), usually <code>T:\</code>. Use a UNC path if this server has no T: drive.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Word (WinWord.exe)</label>
+            <input
+              value={config.cm2WordPath}
+              onChange={(e) => setConfig({ ...config, cm2WordPath: e.target.value })}
+              placeholder="C:\Program Files (x86)\Microsoft Office\OFFICE11\Winword.exe"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Same as <code>msword</code> in CM2 config. Used to launch RTF reports instead of downloading them.
+            </p>
           </div>
           <p className="text-xs text-muted-foreground">
             CM2 is an Oracle database on a separate server from H1PACS SQL Server.

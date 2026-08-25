@@ -22,13 +22,18 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const { login, username: currentUser, isAdmin, modules } = useAuth()
+  const { login, username: currentUser, isAdmin, isSuperAdmin, modules } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const passwordRef = useRef<HTMLInputElement>(null)
 
-  const resolveRedirect = (nextIsAdmin: boolean, nextModules: typeof modules) => {
-    const perms = { username: username.trim(), isAdmin: nextIsAdmin, modules: nextModules }
+  const resolveRedirect = (nextIsAdmin: boolean, nextIsSuperAdmin: boolean, nextModules: typeof modules) => {
+    const perms = {
+      username: username.trim(),
+      isAdmin: nextIsAdmin,
+      isSuperAdmin: nextIsSuperAdmin,
+      modules: nextModules,
+    }
     const from = (location.state as { from?: { pathname: string } })?.from?.pathname
     if (from && from !== '/' && canAccessPath(from, perms)) return from
     return defaultPathForUser(perms)
@@ -36,9 +41,9 @@ export default function Login() {
 
   React.useEffect(() => {
     if (currentUser) {
-      navigate(resolveRedirect(isAdmin, modules), { replace: true })
+      navigate(resolveRedirect(isAdmin, isSuperAdmin, modules), { replace: true })
     }
-  }, [currentUser, isAdmin, modules, navigate])
+  }, [currentUser, isAdmin, isSuperAdmin, modules, navigate])
 
   const loadUsernames = React.useCallback(async () => {
     setUsernamesLoading(true)
@@ -89,7 +94,7 @@ export default function Login() {
     setLoading(false)
     if (result.success) {
       localStorage.setItem(LAST_USERNAME_KEY, username.trim())
-      navigate(resolveRedirect(Boolean(result.isAdmin), result.modules ?? []), { replace: true })
+      navigate(resolveRedirect(Boolean(result.isAdmin), Boolean(result.isSuperAdmin), result.modules ?? []), { replace: true })
     } else {
       setError(result.error || 'Login failed')
     }

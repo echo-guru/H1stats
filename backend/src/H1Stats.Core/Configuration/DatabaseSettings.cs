@@ -26,6 +26,18 @@ public class DatabaseSettings
     public string Username { get; set; } = "h1stats";
     public string Password { get; set; } = "";
 
+    /// <summary>
+    /// Folder CM2 relative report paths are resolved against (same as <c>mapped_drive</c> in CM2 config, typically <c>T:\</c>).
+    /// <c>TEST.REPORT_PATH</c> values look like <c>\reports\ttx_echo\2003\{rid}.rtf</c>.
+    /// </summary>
+    public string Cm2ReportRoot { get; set; } = @"T:\";
+
+    /// <summary>
+    /// Path to WinWord.exe used to open CM2 RTF reports (same as <c>msword</c> in CM2 config).
+    /// </summary>
+    public string Cm2WordPath { get; set; } =
+        @"C:\Program Files (x86)\Microsoft Office\OFFICE11\Winword.exe";
+
     public string EffectiveCm2Server =>
         string.IsNullOrWhiteSpace(Cm2Server) ? Server : Cm2Server.Trim();
 

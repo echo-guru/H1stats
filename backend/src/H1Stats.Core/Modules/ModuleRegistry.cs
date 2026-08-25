@@ -22,6 +22,13 @@ public sealed class AdministrationModule : IAppModule
     public string RoutePrefix => "/admin";
 }
 
+public sealed class ResearchModule : IAppModule
+{
+    public string Id => "research";
+    public string DisplayName => "Research";
+    public string RoutePrefix => "/research";
+}
+
 /// <summary>Central registry for module discovery and permission checks.</summary>
 public class ModuleRegistry
 {

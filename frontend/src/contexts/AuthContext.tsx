@@ -4,6 +4,7 @@ import { normalizeModules } from '../utils/permissions'
 
 const AUTH_USERNAME_KEY = 'h1stats_username'
 const AUTH_IS_ADMIN_KEY = 'h1stats_is_admin'
+const AUTH_IS_SUPER_ADMIN_KEY = 'h1stats_is_super_admin'
 const AUTH_MODULES_KEY = 'h1stats_modules'
 const AUTH_TOKEN_KEY = 'h1stats_token'
 
@@ -11,12 +12,14 @@ export interface LoginResult {
   success: boolean
   error?: string
   isAdmin?: boolean
+  isSuperAdmin?: boolean
   modules?: AppModule[]
 }
 
 interface AuthContextType {
   username: string | null
   isAdmin: boolean
+  isSuperAdmin: boolean
   modules: AppModule[]
   login: (username: string, password: string) => Promise<LoginResult>
   logout: () => void
@@ -43,20 +46,23 @@ function readStoredModules(): AppModule[] {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [username, setUsername] = useState<string | null>(() => sessionStorage.getItem(AUTH_USERNAME_KEY))
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem(AUTH_IS_ADMIN_KEY) === 'true')
+  const [isSuperAdmin, setIsSuperAdmin] = useState(() => sessionStorage.getItem(AUTH_IS_SUPER_ADMIN_KEY) === 'true')
   const [modules, setModules] = useState<AppModule[]>(() => readStoredModules())
 
   useEffect(() => {
     if (username) {
       sessionStorage.setItem(AUTH_USERNAME_KEY, username)
       sessionStorage.setItem(AUTH_IS_ADMIN_KEY, String(isAdmin))
+      sessionStorage.setItem(AUTH_IS_SUPER_ADMIN_KEY, String(isSuperAdmin))
       sessionStorage.setItem(AUTH_MODULES_KEY, JSON.stringify(modules))
     } else {
       sessionStorage.removeItem(AUTH_USERNAME_KEY)
       sessionStorage.removeItem(AUTH_IS_ADMIN_KEY)
+      sessionStorage.removeItem(AUTH_IS_SUPER_ADMIN_KEY)
       sessionStorage.removeItem(AUTH_MODULES_KEY)
       sessionStorage.removeItem(AUTH_TOKEN_KEY)
     }
-  }, [username, isAdmin, modules])
+  }, [username, isAdmin, isSuperAdmin, modules])
 
   const login = useCallback(async (user: string, password: string): Promise<LoginResult> => {
     try {
@@ -72,31 +78,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const data = await res.json()
       setUsername(data.username)
       setIsAdmin(Boolean(data.isAdmin))
+      setIsSuperAdmin(Boolean(data.isSuperAdmin))
       setModules(normalizeModules(data.modules))
       if (data.token) sessionStorage.setItem(AUTH_TOKEN_KEY, data.token)
-      return { success: true, isAdmin: data.isAdmin, modules: data.modules }
+      return { success: true, isAdmin: data.isAdmin, isSuperAdmin: data.isSuperAdmin, modules: data.modules }
     } catch {
       // Dev fallback when backend is not running
       if (user === 'tonyf' && password === 'tony') {
         const devModules: AppModule[] = ['dashboard', 'clinical', 'administration']
         setUsername('tonyf')
         setIsAdmin(true)
+        setIsSuperAdmin(true)
         setModules(devModules)
-        return { success: true, isAdmin: true, modules: devModules }
+        return { success: true, isAdmin: true, isSuperAdmin: true, modules: devModules }
       }
       if (user === 'admin' && password === 'admin') {
         const devModules: AppModule[] = ['dashboard', 'clinical', 'administration']
         setUsername('admin')
         setIsAdmin(true)
+        setIsSuperAdmin(false)
         setModules(devModules)
-        return { success: true, isAdmin: true, modules: devModules }
+        return { success: true, isAdmin: true, isSuperAdmin: false, modules: devModules }
       }
       if (user === 'clinical' && password === 'clinical') {
         const devModules: AppModule[] = ['dashboard', 'clinical']
         setUsername('clinical')
         setIsAdmin(false)
+        setIsSuperAdmin(false)
         setModules(devModules)
-        return { success: true, isAdmin: false, modules: devModules }
+        return { success: true, isAdmin: false, isSuperAdmin: false, modules: devModules }
       }
       return { success: false, error: 'Cannot reach server. Use tonyf/tony, admin/admin, or clinical/clinical for offline dev.' }
     }
@@ -105,12 +115,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = useCallback(() => {
     setUsername(null)
     setIsAdmin(false)
+    setIsSuperAdmin(false)
     setModules([])
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
   }, [])
 
   return (
-    <AuthContext.Provider value={{ username, isAdmin, modules, login, logout }}>
+    <AuthContext.Provider value={{ username, isAdmin, isSuperAdmin, modules, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

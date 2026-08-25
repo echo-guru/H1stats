@@ -13,6 +13,8 @@ interface MonthTotalChartProps {
   compact?: boolean
   framed?: boolean
   variant?: 'bar' | 'line'
+  selectedKey?: string | null
+  onSelect?: (yearMonth: string) => void
 }
 
 function niceMax(value: number): number {
@@ -39,13 +41,15 @@ export function MonthTotalChart({
   compact = false,
   framed = true,
   variant = 'bar',
+  selectedKey = null,
+  onSelect,
 }: MonthTotalChartProps) {
   const gradId = `trend-fill-${useId().replace(/:/g, '')}`
   const width = 760
   const height = compact ? 216 : 300
   const pad = compact
-    ? { top: 22, right: 16, bottom: 44, left: 44 }
-    : { top: 28, right: 20, bottom: 52, left: 52 }
+    ? { top: onSelect ? 28 : 22, right: 16, bottom: 44, left: 44 }
+    : { top: onSelect ? 34 : 28, right: 20, bottom: 52, left: 52 }
   const innerW = width - pad.left - pad.right
   const innerH = height - pad.top - pad.bottom
   const maxY = niceMax(Math.max(0, ...months.map((m) => m.total)))
@@ -71,7 +75,7 @@ export function MonthTotalChart({
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className={`w-full h-auto ${compact ? 'min-w-[520px]' : 'min-w-[640px]'}`}
-          role="img"
+          role={onSelect ? 'group' : 'img'}
           aria-label={title || 'Monthly totals'}
         >
           <defs>
@@ -131,9 +135,41 @@ export function MonthTotalChart({
                 const y = pad.top + innerH - h
                 const { month, year } = shortMonthLabel(m.label)
                 const cx = x + barW / 2
+                const selected = selectedKey === m.yearMonth
+                const clickable = Boolean(onSelect) && m.total > 0
                 return (
-                  <g key={m.yearMonth}>
-                    <title>{`${m.label}: ${m.total.toLocaleString()}`}</title>
+                  <g
+                    key={m.yearMonth}
+                    onClick={clickable ? () => onSelect?.(m.yearMonth) : undefined}
+                    style={clickable ? { cursor: 'pointer' } : undefined}
+                    role={clickable ? 'button' : undefined}
+                    tabIndex={clickable ? 0 : undefined}
+                    onKeyDown={
+                      clickable
+                        ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onSelect?.(m.yearMonth)
+                            }
+                          }
+                        : undefined
+                    }
+                  >
+                    <title>
+                      {clickable
+                        ? `${m.label}: ${m.total.toLocaleString()} — click to show tests`
+                        : `${m.label}: ${m.total.toLocaleString()}`}
+                    </title>
+                    {clickable && (
+                      <rect
+                        x={pad.left + slot * i}
+                        y={pad.top}
+                        width={slot}
+                        height={innerH}
+                        fill={selected ? '#33758F' : 'transparent'}
+                        opacity={selected ? 0.08 : 1}
+                      />
+                    )}
                     <rect
                       x={x}
                       y={y}
@@ -150,6 +186,8 @@ export function MonthTotalChart({
                         fill="#33758F"
                         fontSize="11"
                         fontFamily="ui-monospace, monospace"
+                        textDecoration={clickable ? 'underline' : undefined}
+                        fontWeight={selected ? 700 : undefined}
                       >
                         {m.total.toLocaleString()}
                       </text>
@@ -163,12 +201,51 @@ export function MonthTotalChart({
                   </g>
                 )
               })
-            : points.map((p) => {
+            : points.map((p, i) => {
                 const { month, year } = shortMonthLabel(p.m.label)
+                const selected = selectedKey === p.m.yearMonth
+                const clickable = Boolean(onSelect) && p.m.total > 0
                 return (
-                  <g key={p.m.yearMonth}>
-                    <title>{`${p.m.label}: ${p.m.total.toLocaleString()}`}</title>
-                    <circle cx={p.x} cy={p.y} r={4.2} fill="#fff" stroke="#33758F" strokeWidth={2} />
+                  <g
+                    key={p.m.yearMonth}
+                    onClick={clickable ? () => onSelect?.(p.m.yearMonth) : undefined}
+                    style={clickable ? { cursor: 'pointer' } : undefined}
+                    role={clickable ? 'button' : undefined}
+                    tabIndex={clickable ? 0 : undefined}
+                    onKeyDown={
+                      clickable
+                        ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onSelect?.(p.m.yearMonth)
+                            }
+                          }
+                        : undefined
+                    }
+                  >
+                    <title>
+                      {clickable
+                        ? `${p.m.label}: ${p.m.total.toLocaleString()} — click to show tests`
+                        : `${p.m.label}: ${p.m.total.toLocaleString()}`}
+                    </title>
+                    {clickable && (
+                      <rect
+                        x={pad.left + slot * i}
+                        y={pad.top}
+                        width={slot}
+                        height={innerH}
+                        fill={selected ? '#33758F' : 'transparent'}
+                        opacity={selected ? 0.08 : 1}
+                      />
+                    )}
+                    <circle
+                      cx={p.x}
+                      cy={p.y}
+                      r={selected ? 5.4 : 4.2}
+                      fill={selected ? '#33758F' : '#fff'}
+                      stroke="#33758F"
+                      strokeWidth={2}
+                    />
                     {p.m.total > 0 && (
                       <text
                         x={p.x}
@@ -177,6 +254,8 @@ export function MonthTotalChart({
                         fill="#33758F"
                         fontSize={compact ? '10' : '11'}
                         fontFamily="ui-monospace, monospace"
+                        textDecoration={clickable ? 'underline' : undefined}
+                        fontWeight={selected ? 700 : undefined}
                       >
                         {p.m.total.toLocaleString()}
                       </text>
