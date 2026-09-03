@@ -23,6 +23,18 @@ public class DatabaseSettings
     /// <summary>Oracle schema owning TEST / PATIENT tables.</summary>
     public string Cm2Schema { get; set; } = "HEARTS1ST";
 
+    /// <summary>Oracle host for CM2 DEV (SandBox only). Defaults to 192.168.12.226.</summary>
+    public string Cm2DevServer { get; set; } = "192.168.12.226";
+
+    /// <summary>Oracle listener port for CM2 DEV (defaults to <see cref="Cm2Port"/>).</summary>
+    public string Cm2DevPort { get; set; } = "";
+
+    /// <summary>Oracle SID for CM2 DEV (e.g. CM2DEV).</summary>
+    public string Cm2DevSid { get; set; } = "CM2DEV";
+
+    /// <summary>Oracle schema on CM2 DEV (defaults to <see cref="Cm2Schema"/>).</summary>
+    public string Cm2DevSchema { get; set; } = "";
+
     public string Username { get; set; } = "h1stats";
     public string Password { get; set; } = "";
 
@@ -41,6 +53,22 @@ public class DatabaseSettings
     public string EffectiveCm2Server =>
         string.IsNullOrWhiteSpace(Cm2Server) ? Server : Cm2Server.Trim();
 
+    public string EffectiveCm2DevServer =>
+        string.IsNullOrWhiteSpace(Cm2DevServer) ? "192.168.12.226" : Cm2DevServer.Trim();
+
+    public string EffectiveCm2DevPort =>
+        string.IsNullOrWhiteSpace(Cm2DevPort)
+            ? (string.IsNullOrWhiteSpace(Cm2Port) ? "1521" : Cm2Port.Trim())
+            : Cm2DevPort.Trim();
+
+    public string EffectiveCm2DevSid =>
+        string.IsNullOrWhiteSpace(Cm2DevSid) ? "CM2DEV" : Cm2DevSid.Trim();
+
+    public string EffectiveCm2DevSchema =>
+        string.IsNullOrWhiteSpace(Cm2DevSchema)
+            ? (string.IsNullOrWhiteSpace(Cm2Schema) ? "HEARTS1ST" : Cm2Schema.Trim().ToUpperInvariant())
+            : Cm2DevSchema.Trim().ToUpperInvariant();
+
     public string MvfConnectionString =>
         BuildSqlConnectionString(Server, MvfDatabase);
 
@@ -54,12 +82,18 @@ public class DatabaseSettings
             var host = EffectiveCm2Server;
             var port = string.IsNullOrWhiteSpace(Cm2Port) ? "1521" : Cm2Port.Trim();
             var sid = string.IsNullOrWhiteSpace(Cm2Sid) ? "CM19" : Cm2Sid.Trim();
-            return
-                $"User Id={Username};Password={Password};" +
-                $"Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT={port}))" +
-                $"(CONNECT_DATA=(SID={sid})));Connection Timeout=5;";
+            return BuildOracleConnectionString(host, port, sid);
         }
     }
+
+    /// <summary>SandBox-only Oracle connection (same Username/Password as production CM2).</summary>
+    public string Cm2DevOracleConnectionString =>
+        BuildOracleConnectionString(EffectiveCm2DevServer, EffectiveCm2DevPort, EffectiveCm2DevSid);
+
+    private string BuildOracleConnectionString(string host, string port, string sid) =>
+        $"User Id={Username};Password={Password};" +
+        $"Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT={port}))" +
+        $"(CONNECT_DATA=(SID={sid})));Connection Timeout=5;";
 
     private string BuildSqlConnectionString(string server, string database) =>
         $"Server={server};Database={database};User Id={Username};Password={Password};TrustServerCertificate=True;ApplicationIntent=ReadOnly;Encrypt=False;";

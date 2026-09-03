@@ -10,6 +10,7 @@ import {
   Activity,
   Microscope,
   ClipboardList,
+  FlaskConical,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import type { AppModule } from '../utils/permissions'
@@ -59,6 +60,13 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Workllists',
     icon: ClipboardList,
     module: 'workllists',
+    superAdminOnly: true,
+  },
+  {
+    path: '/sandbox',
+    label: 'SandBox',
+    icon: FlaskConical,
+    module: 'sandbox',
     superAdminOnly: true,
   },
   {

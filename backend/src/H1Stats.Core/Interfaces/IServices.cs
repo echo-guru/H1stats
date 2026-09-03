@@ -89,6 +89,14 @@ public interface ICm2Repository
     /// </summary>
     Task<(bool Ok, string? Error)> UpdateAppointmentNoteAsync(
         string appointmentId, string? note, CancellationToken ct = default);
+    Task<(bool Ok, string? Error, string? ServiceTypeId, string? ServiceTitle)> UpdateAppointmentServiceTypeAsync(
+        string appointmentId, string serviceTypeId, CancellationToken ct = default);
+    Task<(bool Ok, string? Error)> ArriveAppointmentAsync(
+        string appointmentId, CancellationToken ct = default);
+    Task<(bool Ok, string? Error, DateOnly? Date, string? Time)> UpdateAppointmentScheduleAsync(
+        string appointmentId, string date, string? time, CancellationToken ct = default);
+    Task<AvailableDiarySlotsResult> GetAvailableDiarySlotsAsync(
+        string appointmentId, string date, CancellationToken ct = default);
 
     /// <summary>
     /// Most recent previous consultation letter (CONSULT ⋈ LETTERS, LETTER_TYPE 6/7)
@@ -114,10 +122,41 @@ public interface ICm2Repository
 public interface IDatabaseConnectionService
 {
     DatabaseSettings GetSettings();
+    /// <summary>Live settings including password — for internal connection use only (never return to clients).</summary>
+    DatabaseSettings GetLiveSettings();
     Task UpdateSettingsAsync(DatabaseSettings settings, CancellationToken ct = default);
     Task<ConnectionTestResult> TestConnectionAsync(DatabaseSettings? settings = null, CancellationToken ct = default);
     Task<IReadOnlyList<DatabaseConnectionTestResult>> TestAllConnectionsAsync(
         DatabaseSettings? settings = null, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Oracle access to CM2 DEV (CM2DEV). Used only by SandBox — never by production reports.
+/// Credentials match the main CM2 Username/Password.
+/// </summary>
+public interface ICm2DevDatabase
+{
+    string Schema { get; }
+    string EndpointLabel { get; }
+    string ConnectionString { get; }
+    Task<DatabaseConnectionTestResult> TestConnectionAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<SiteOption>> GetSitesAsync(CancellationToken ct = default);
+    Task<PinkRecallWorklistResult> GetUnarrivedPinkRecallsAsync(
+        DateOnly? dateFrom = null,
+        DateOnly? dateTo = null,
+        string? site = null,
+        string? cardiologistId = null,
+        CancellationToken ct = default);
+    Task<(bool Ok, string? Error)> UpdateAppointmentNoteAsync(
+        string appointmentId, string? note, CancellationToken ct = default);
+    Task<(bool Ok, string? Error, string? ServiceTypeId, string? ServiceTitle)> UpdateAppointmentServiceTypeAsync(
+        string appointmentId, string serviceTypeId, CancellationToken ct = default);
+    Task<(bool Ok, string? Error)> ArriveAppointmentAsync(
+        string appointmentId, CancellationToken ct = default);
+    Task<(bool Ok, string? Error, DateOnly? Date, string? Time)> UpdateAppointmentScheduleAsync(
+        string appointmentId, string date, string? time, CancellationToken ct = default);
+    Task<AvailableDiarySlotsResult> GetAvailableDiarySlotsAsync(
+        string appointmentId, string date, CancellationToken ct = default);
 }
 
 /// <summary>Server-side client for the local research LLM. The browser never sees the API key.</summary>

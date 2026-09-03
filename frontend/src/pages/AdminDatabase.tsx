@@ -8,6 +8,9 @@ interface DbConfig {
   cm2Server: string
   cm2Port: string
   cm2Sid: string
+  cm2DevServer: string
+  cm2DevPort: string
+  cm2DevSid: string
   mvfDatabase: string
   acusonDatabase: string
   username: string
@@ -33,6 +36,9 @@ export default function AdminDatabase() {
     cm2Server: '',
     cm2Port: '1521',
     cm2Sid: 'CM19',
+    cm2DevServer: '192.168.12.226',
+    cm2DevPort: '1521',
+    cm2DevSid: 'CM2DEV',
     mvfDatabase: 'mvf',
     acusonDatabase: 'AcusonDB',
     username: 'h1stats',
@@ -204,6 +210,42 @@ export default function AdminDatabase() {
           <p className="text-xs text-muted-foreground">
             CM2 is an Oracle database on a separate server from H1PACS SQL Server.
           </p>
+        </div>
+
+        <div className="space-y-4 border-t border-brand-primary-border pt-4">
+          <h3 className="text-sm font-semibold text-brand-primary">CM2 DEV (SandBox only)</h3>
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            Used only by the SandBox tab. Uses the same Username/Password as production CM2 above.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-brand-primary mb-1">Server</label>
+              <input
+                value={config.cm2DevServer}
+                onChange={(e) => setConfig({ ...config, cm2DevServer: e.target.value })}
+                placeholder="e.g. 192.168.12.226"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-brand-primary mb-1">Port</label>
+              <input
+                value={config.cm2DevPort}
+                onChange={(e) => setConfig({ ...config, cm2DevPort: e.target.value })}
+                placeholder="1521"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Oracle SID</label>
+            <input
+              value={config.cm2DevSid}
+              onChange={(e) => setConfig({ ...config, cm2DevSid: e.target.value })}
+              placeholder="CM2DEV"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
         </div>
 
         <div className="space-y-4 border-t border-brand-primary-border pt-4">

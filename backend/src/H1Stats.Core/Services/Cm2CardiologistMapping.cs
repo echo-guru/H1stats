@@ -6,6 +6,14 @@ public static class Cm2CardiologistMapping
     public const string UndefinedId = "1";
     public const string UndefinedDisplayName = "Undefined Dr";
 
+    /// <summary>Worklist filter token: patients with no assigned H1 cardiologist (null/0/undefined).</summary>
+    public const string UnassignedFilterId = "unassigned";
+    public const string UnassignedDisplayName = "Unassigned";
+
+    public static bool IsUnassignedFilter(string? filter) =>
+        string.Equals(filter?.Trim(), UnassignedFilterId, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(filter?.Trim(), UnassignedDisplayName, StringComparison.OrdinalIgnoreCase);
+
     private static readonly Dictionary<string, (string DisplayName, string Initials)> ById = new(StringComparer.OrdinalIgnoreCase)
     {
         [UndefinedId] = (UndefinedDisplayName, "?"),

@@ -6,9 +6,21 @@ export interface VersionEntry {
 }
 
 /** Current product version shown in Settings and System Health. */
-export const APP_VERSION = '1.6.0'
+export const APP_VERSION = '1.7.0'
 
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: '1.7.0',
+    date: '3 Sep 2026',
+    title: 'Workllists diary actions and SandBox CM2DEV',
+    changes: [
+      'Pink recall worklist: staged Done/Cancel editing for notes, test type (Cardiology ↔ Admin Recall), arrive, and date/time moves.',
+      'Move recalls only into free room slots for that day (15-minute duration-aware clash check against other bookings).',
+      'Cardiologist filter includes Unassigned (null / 0 / Undefined Dr).',
+      'New Super Admin SandBox tab against Oracle CM2DEV with the same worklist tools and a clear DEV-only banner.',
+      'Admin Database settings and connection tests for CM2 DEV (separate from production CM2).',
+    ],
+  },
   {
     version: '1.6.0',
     date: '3 Sep 2026',

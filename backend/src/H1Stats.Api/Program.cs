@@ -34,6 +34,7 @@ builder.Services.AddSingleton<IResearchStudyStore>(_ => new ResearchStudyStore(s
 builder.Services.AddSingleton<IResearchScreeningResultStore>(_ =>
     new ResearchScreeningResultStore(screeningResultsFilePath));
 builder.Services.AddScoped<ICm2Repository, Cm2Repository>();
+builder.Services.AddSingleton<ICm2DevDatabase, Cm2DevDatabase>();
 builder.Services.AddSingleton<IResearchScreeningJobService, ResearchScreeningJobService>();
 builder.Services.AddScoped<IResearchScreeningService>(sp =>
     new ResearchScreeningService(

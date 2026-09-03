@@ -22,6 +22,7 @@ import SystemHealth from './pages/SystemHealth'
 import ResearchHome from './pages/ResearchHome'
 import ResearchStudyEditor from './pages/ResearchStudyEditor'
 import WorkllistsHome from './pages/WorkllistsHome'
+import SandBoxHome from './pages/SandBoxHome'
 
 function App() {
   return (
@@ -48,6 +49,7 @@ function App() {
               <Route path="/research/studies/new" element={<ResearchStudyEditor />} />
               <Route path="/research/studies/:id" element={<ResearchStudyEditor />} />
               <Route path="/workllists" element={<WorkllistsHome />} />
+              <Route path="/sandbox" element={<SandBoxHome />} />
               <Route path="/admin" element={<AdminHome />} />
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/database" element={<AdminDatabase />} />

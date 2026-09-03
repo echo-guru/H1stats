@@ -17,7 +17,9 @@ public record PinkRecallWorklistRow(
     string? SiteName,
     DateOnly AppointmentDate,
     string? AppointmentTime,
-    string? AppointmentNote
+    string? AppointmentNote,
+    string ServiceTypeId,
+    string ServiceTitle
 );
 
 public record PinkRecallWorklistResult(
@@ -27,4 +29,17 @@ public record PinkRecallWorklistResult(
     string? CardiologistId,
     int Count,
     IReadOnlyList<PinkRecallWorklistRow> Rows
+);
+
+/// <summary>Free diary start times for an appointment's room/day/duration (15-min slots).</summary>
+public record AvailableDiarySlotsResult(
+    string AppointmentId,
+    string Date,
+    string? RoomId,
+    string? RoomName,
+    int DurationSlots,
+    int SlotMinutes,
+    string? CurrentTime,
+    IReadOnlyList<string> Slots,
+    string? Message
 );

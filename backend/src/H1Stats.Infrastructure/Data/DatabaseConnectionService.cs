@@ -22,20 +22,15 @@ public class DatabaseConnectionService : IDatabaseConnectionService
     {
         lock (_lock)
         {
-            return new DatabaseSettings
-            {
-                Server = _settings.Server,
-                Cm2Server = _settings.Cm2Server,
-                Cm2Port = _settings.Cm2Port,
-                MvfDatabase = _settings.MvfDatabase,
-                AcusonDatabase = _settings.AcusonDatabase,
-                Cm2Sid = _settings.Cm2Sid,
-                Cm2Schema = _settings.Cm2Schema,
-                Username = _settings.Username,
-                Password = string.Empty,
-                Cm2ReportRoot = _settings.Cm2ReportRoot,
-                Cm2WordPath = _settings.Cm2WordPath
-            };
+            return CloneForClient(_settings);
+        }
+    }
+
+    public DatabaseSettings GetLiveSettings()
+    {
+        lock (_lock)
+        {
+            return CloneLive(_settings);
         }
     }
 
@@ -62,7 +57,7 @@ public class DatabaseConnectionService : IDatabaseConnectionService
         DatabaseSettings cfg;
         lock (_lock)
         {
-            cfg = settings is null ? _settings : MergeSettings(settings);
+            cfg = settings is null ? CloneLive(_settings) : MergeSettings(settings);
         }
 
         var sqlTests = new[]
@@ -70,12 +65,19 @@ public class DatabaseConnectionService : IDatabaseConnectionService
             TestSqlAsync($"{cfg.MvfDatabase} @ {cfg.Server}", cfg.MvfConnectionString, ct),
             TestSqlAsync($"{cfg.AcusonDatabase} @ {cfg.Server}", cfg.AcusonConnectionString, ct),
         };
-        var oracleTest = TestOracleAsync(
-            $"{cfg.Cm2Sid} @ {cfg.EffectiveCm2Server}:{cfg.Cm2Port}",
-            cfg.Cm2OracleConnectionString,
-            ct);
+        var oracleTests = new[]
+        {
+            TestOracleAsync(
+                $"{cfg.Cm2Sid} @ {cfg.EffectiveCm2Server}:{cfg.Cm2Port}",
+                cfg.Cm2OracleConnectionString,
+                ct),
+            TestOracleAsync(
+                $"CM2DEV {cfg.EffectiveCm2DevSid} @ {cfg.EffectiveCm2DevServer}:{cfg.EffectiveCm2DevPort}",
+                cfg.Cm2DevOracleConnectionString,
+                ct),
+        };
 
-        var results = await Task.WhenAll(sqlTests.Append(oracleTest));
+        var results = await Task.WhenAll(sqlTests.Concat(oracleTests));
         return results;
     }
 
@@ -89,10 +91,41 @@ public class DatabaseConnectionService : IDatabaseConnectionService
             AcusonDatabase = incoming.AcusonDatabase,
             Cm2Sid = incoming.Cm2Sid,
             Cm2Schema = incoming.Cm2Schema,
+            Cm2DevServer = incoming.Cm2DevServer,
+            Cm2DevPort = incoming.Cm2DevPort,
+            Cm2DevSid = incoming.Cm2DevSid,
+            Cm2DevSchema = incoming.Cm2DevSchema,
             Username = incoming.Username,
             Password = string.IsNullOrWhiteSpace(incoming.Password) ? _settings.Password : incoming.Password,
             Cm2ReportRoot = string.IsNullOrWhiteSpace(incoming.Cm2ReportRoot) ? _settings.Cm2ReportRoot : incoming.Cm2ReportRoot,
             Cm2WordPath = string.IsNullOrWhiteSpace(incoming.Cm2WordPath) ? _settings.Cm2WordPath : incoming.Cm2WordPath,
+        };
+
+    private static DatabaseSettings CloneForClient(DatabaseSettings source)
+    {
+        var clone = CloneLive(source);
+        clone.Password = string.Empty;
+        return clone;
+    }
+
+    private static DatabaseSettings CloneLive(DatabaseSettings source) =>
+        new()
+        {
+            Server = source.Server,
+            Cm2Server = source.Cm2Server,
+            Cm2Port = source.Cm2Port,
+            MvfDatabase = source.MvfDatabase,
+            AcusonDatabase = source.AcusonDatabase,
+            Cm2Sid = source.Cm2Sid,
+            Cm2Schema = source.Cm2Schema,
+            Cm2DevServer = source.Cm2DevServer,
+            Cm2DevPort = source.Cm2DevPort,
+            Cm2DevSid = source.Cm2DevSid,
+            Cm2DevSchema = source.Cm2DevSchema,
+            Username = source.Username,
+            Password = source.Password,
+            Cm2ReportRoot = source.Cm2ReportRoot,
+            Cm2WordPath = source.Cm2WordPath,
         };
 
     private static async Task<DatabaseConnectionTestResult> TestSqlAsync(
