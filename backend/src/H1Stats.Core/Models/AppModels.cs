@@ -27,11 +27,22 @@ public record LoginRequest(string Username, string Password);
 
 public record LoginResponse(string Username, bool IsAdmin, bool IsSuperAdmin, IReadOnlyList<string> Modules, string? Token);
 
-public record UserDto(string Username, bool IsAdmin, bool IsDisabled);
+public record UserDto(string Username, bool IsAdmin, bool IsDisabled, bool IsSuperAdmin = false);
 
-public record CreateUserRequest(string Username, string Password, bool IsAdmin);
+public record CreateUserRequest(
+    string Username,
+    string Password,
+    bool IsAdmin,
+    bool IsSuperAdmin = false,
+    string? ActorUsername = null);
 
-public record UpdateUserRequest(string? Password, bool? IsAdmin, bool? IsDisabled, string? NewUsername);
+public record UpdateUserRequest(
+    string? Password,
+    bool? IsAdmin,
+    bool? IsDisabled,
+    string? NewUsername,
+    bool? IsSuperAdmin = null,
+    string? ActorUsername = null);
 
 public record SetFavoriteReportsRequest(string Username, IReadOnlyList<string> Paths);
 

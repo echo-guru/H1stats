@@ -6,6 +6,7 @@ export type AppModule =
   | 'operations'
   | 'quality'
   | 'research'
+  | 'workllists'
   | 'finance'
 
 export const ALL_MODULES: AppModule[] = [
@@ -15,6 +16,7 @@ export const ALL_MODULES: AppModule[] = [
   'operations',
   'quality',
   'research',
+  'workllists',
   'finance',
 ]
 
@@ -25,6 +27,7 @@ export const MODULE_LABELS: Record<AppModule, string> = {
   operations: 'Operations',
   quality: 'Quality',
   research: 'Research',
+  workllists: 'Workllists',
   finance: 'Finance',
 }
 
@@ -39,12 +42,14 @@ const PATH_MODULE_MAP: { prefix: string; module: AppModule }[] = [
   { prefix: '/admin', module: 'administration' },
   { prefix: '/clinical', module: 'clinical' },
   { prefix: '/research', module: 'research' },
+  { prefix: '/workllists', module: 'workllists' },
   { prefix: '/dashboard', module: 'dashboard' },
   { prefix: '/', module: 'dashboard' },
 ]
 
 export function canAccessPath(path: string, perms: UserPermissions): boolean {
   if (path === '/research' || path.startsWith('/research/')) return perms.isSuperAdmin
+  if (path === '/workllists' || path.startsWith('/workllists/')) return perms.isSuperAdmin
   if (perms.isAdmin) return true
   const entry = PATH_MODULE_MAP.find((m) => path === m.prefix || path.startsWith(m.prefix + '/'))
   if (!entry) return true

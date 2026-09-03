@@ -9,6 +9,7 @@ import {
   Database,
   Activity,
   Microscope,
+  ClipboardList,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import type { AppModule } from '../utils/permissions'
@@ -51,6 +52,13 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Research',
     icon: Microscope,
     module: 'research',
+    superAdminOnly: true,
+  },
+  {
+    path: '/workllists',
+    label: 'Workllists',
+    icon: ClipboardList,
+    module: 'workllists',
     superAdminOnly: true,
   },
   {

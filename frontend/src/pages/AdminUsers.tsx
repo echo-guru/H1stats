@@ -2,26 +2,42 @@ import { useCallback, useEffect, useState } from 'react'
 import { Plus, Save, Trash2, Users } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { AdminBackLink } from '../components/AdminBackLink'
+import { useAuth } from '../contexts/AuthContext'
 
 interface UserRow {
   username: string
   isAdmin: boolean
   isDisabled: boolean
+  isSuperAdmin: boolean
 }
+
+type RoleValue = 'user' | 'admin' | 'superadmin'
 
 interface EditState {
   username: string
-  isAdmin: boolean
+  role: RoleValue
   isDisabled: boolean
   password: string
 }
 
-const EMPTY_CREATE = { username: '', password: '', isAdmin: false }
+const EMPTY_CREATE = { username: '', password: '', role: 'user' as RoleValue }
+
+function roleFromUser(user: Pick<UserRow, 'isAdmin' | 'isSuperAdmin'>): RoleValue {
+  if (user.isSuperAdmin) return 'superadmin'
+  if (user.isAdmin) return 'admin'
+  return 'user'
+}
+
+function flagsFromRole(role: RoleValue): { isAdmin: boolean; isSuperAdmin: boolean } {
+  if (role === 'superadmin') return { isAdmin: true, isSuperAdmin: true }
+  if (role === 'admin') return { isAdmin: true, isSuperAdmin: false }
+  return { isAdmin: false, isSuperAdmin: false }
+}
 
 function editFromUser(user: UserRow): EditState {
   return {
     username: user.username,
-    isAdmin: user.isAdmin,
+    role: roleFromUser(user),
     isDisabled: user.isDisabled,
     password: '',
   }
@@ -30,13 +46,14 @@ function editFromUser(user: UserRow): EditState {
 function editIsDirty(user: UserRow, edit: EditState): boolean {
   return (
     edit.username.trim() !== user.username
-    || edit.isAdmin !== user.isAdmin
+    || edit.role !== roleFromUser(user)
     || edit.isDisabled !== user.isDisabled
     || edit.password.trim().length > 0
   )
 }
 
 export default function AdminUsers() {
+  const { username: actorUsername, isSuperAdmin } = useAuth()
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -53,9 +70,16 @@ export default function AdminUsers() {
     try {
       const res = await fetch('/api/admin/users')
       if (!res.ok) throw new Error('Failed to load users')
-      const data: UserRow[] = await res.json()
-      setUsers(data)
-      setEdits(Object.fromEntries(data.map((u) => [u.username, editFromUser(u)])))
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('Failed to load users')
+      const rows: UserRow[] = data.map((u: Partial<UserRow>) => ({
+        username: String(u.username ?? ''),
+        isAdmin: Boolean(u.isAdmin),
+        isDisabled: Boolean(u.isDisabled),
+        isSuperAdmin: Boolean(u.isSuperAdmin),
+      }))
+      setUsers(rows)
+      setEdits(Object.fromEntries(rows.map((u) => [u.username, editFromUser(u)])))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load users')
       setUsers([])
@@ -75,13 +99,16 @@ export default function AdminUsers() {
     setError('')
     setMessage('')
     try {
+      const flags = flagsFromRole(createForm.role)
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: createForm.username.trim(),
           password: createForm.password,
-          isAdmin: createForm.isAdmin,
+          isAdmin: flags.isAdmin,
+          isSuperAdmin: flags.isSuperAdmin,
+          actorUsername: actorUsername ?? undefined,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -110,14 +137,19 @@ export default function AdminUsers() {
     setError('')
     setMessage('')
     try {
+      const flags = flagsFromRole(edit.role)
       const body: {
         isAdmin: boolean
         isDisabled: boolean
+        isSuperAdmin: boolean
+        actorUsername?: string
         password?: string
         newUsername?: string
       } = {
-        isAdmin: edit.isAdmin,
+        isAdmin: flags.isAdmin,
         isDisabled: edit.isDisabled,
+        isSuperAdmin: flags.isSuperAdmin,
+        actorUsername: actorUsername ?? undefined,
       }
       if (edit.password.trim()) body.password = edit.password
       if (trimmedUsername !== originalUsername) body.newUsername = trimmedUsername
@@ -173,6 +205,25 @@ export default function AdminUsers() {
     }))
   }
 
+  const roleSelect = (
+    value: RoleValue,
+    onChange: (role: RoleValue) => void,
+    className: string
+  ) => (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as RoleValue)}
+      className={className}
+    >
+      <option value="user">User — dashboard and clinical</option>
+      <option value="admin">Admin — full access</option>
+      {isSuperAdmin && <option value="superadmin">Super Admin — full access + restricted modules</option>}
+      {!isSuperAdmin && value === 'superadmin' && (
+        <option value="superadmin">Super Admin</option>
+      )}
+    </select>
+  )
+
   return (
     <div className="space-y-6">
       <AdminBackLink />
@@ -182,6 +233,9 @@ export default function AdminUsers() {
           <h2 className="text-2xl font-semibold text-brand-accent">User Administration</h2>
           <p className="text-sm text-gray-600">
             Create, edit, disable, or remove users. Disabled users cannot sign in.
+            {isSuperAdmin
+              ? ' As Super Admin you can also grant Super Admin to others.'
+              : ''}
           </p>
         </div>
       </div>
@@ -219,14 +273,11 @@ export default function AdminUsers() {
           </div>
           <div>
             <label className="block text-sm font-medium text-brand-primary mb-1">Role</label>
-            <select
-              value={createForm.isAdmin ? 'admin' : 'user'}
-              onChange={(e) => setCreateForm({ ...createForm, isAdmin: e.target.value === 'admin' })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary bg-white"
-            >
-              <option value="user">User — dashboard and clinical</option>
-              <option value="admin">Admin — full access</option>
-            </select>
+            {roleSelect(
+              createForm.role,
+              (role) => setCreateForm({ ...createForm, role }),
+              'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary bg-white'
+            )}
           </div>
           <Button type="submit" variant="brand" disabled={creating} className="gap-2">
             <Plus className="h-4 w-4" />
@@ -260,6 +311,7 @@ export default function AdminUsers() {
                 {users.map((user) => {
                   const edit = edits[user.username] ?? editFromUser(user)
                   const dirty = editIsDirty(user, edit)
+                  const roleDisabled = !isSuperAdmin && user.isSuperAdmin
                   return (
                     <tr
                       key={user.username}
@@ -276,16 +328,17 @@ export default function AdminUsers() {
                         />
                       </td>
                       <td className="p-3">
-                        <select
-                          value={edit.isAdmin ? 'admin' : 'user'}
-                          onChange={(e) =>
-                            updateEdit(user.username, { isAdmin: e.target.value === 'admin' })
-                          }
-                          className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-brand-primary"
-                        >
-                          <option value="user">User</option>
-                          <option value="admin">Admin</option>
-                        </select>
+                        {roleDisabled ? (
+                          <span className="inline-flex items-center px-2 py-1.5 text-sm text-brand-primary bg-brand-primary-light rounded-lg">
+                            Super Admin
+                          </span>
+                        ) : (
+                          roleSelect(
+                            edit.role,
+                            (role) => updateEdit(user.username, { role }),
+                            'border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-brand-primary'
+                          )
+                        )}
                       </td>
                       <td className="p-3">
                         <select

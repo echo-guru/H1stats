@@ -120,12 +120,23 @@ public class AuthService : IAuthService, IUserAdminService
             if (_users.Any(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase)))
                 return Task.FromResult<(UserDto?, string?)>((null, "Username already exists"));
 
+            var isSuperAdmin = request.IsSuperAdmin;
+            if (isSuperAdmin)
+            {
+                var authError = RequireActiveSuperAdmin(request.ActorUsername);
+                if (authError is not null)
+                    return Task.FromResult<(UserDto?, string?)>((null, authError));
+            }
+
+            var isAdmin = request.IsAdmin || isSuperAdmin;
+
             var user = new UserAccount(
                 username,
                 PasswordHasher.Hash(request.Password),
-                request.IsAdmin,
+                isAdmin,
                 IsDisabled: false,
-                Modules: ModulesForRole(request.IsAdmin));
+                Modules: ModulesForRole(isAdmin),
+                IsSuperAdmin: isSuperAdmin);
 
             _users.Add(user);
             PersistUnlocked();
@@ -147,6 +158,18 @@ public class AuthService : IAuthService, IUserAdminService
             var current = _users[index];
             var isAdmin = request.IsAdmin ?? current.IsAdmin;
             var isDisabled = request.IsDisabled ?? current.IsDisabled;
+            var isSuperAdmin = current.IsSuperAdmin;
+
+            if (request.IsSuperAdmin.HasValue && request.IsSuperAdmin.Value != current.IsSuperAdmin)
+            {
+                var authError = RequireActiveSuperAdmin(request.ActorUsername);
+                if (authError is not null)
+                    return Task.FromResult<(UserDto?, string?)>((null, authError));
+                isSuperAdmin = request.IsSuperAdmin.Value;
+            }
+
+            if (isSuperAdmin)
+                isAdmin = true;
 
             var newUsername = string.IsNullOrWhiteSpace(request.NewUsername)
                 ? current.Username
@@ -171,6 +194,18 @@ public class AuthService : IAuthService, IUserAdminService
                     return Task.FromResult<(UserDto?, string?)>((null, "At least one active admin is required"));
             }
 
+            var wasEnabledSuper = current.IsSuperAdmin && !current.IsDisabled;
+            var willBeEnabledSuper = isSuperAdmin && !isDisabled;
+            if (wasEnabledSuper && !willBeEnabledSuper)
+            {
+                var otherEnabledSupers = _users.Count(u =>
+                    !u.Username.Equals(current.Username, StringComparison.OrdinalIgnoreCase)
+                    && u.IsSuperAdmin
+                    && !u.IsDisabled);
+                if (otherEnabledSupers == 0)
+                    return Task.FromResult<(UserDto?, string?)>((null, "At least one active Super Admin is required"));
+            }
+
             var passwordHash = string.IsNullOrWhiteSpace(request.Password)
                 ? current.PasswordHash
                 : PasswordHasher.Hash(request.Password);
@@ -183,7 +218,7 @@ public class AuthService : IAuthService, IUserAdminService
                 Modules = ModulesForRole(isAdmin),
                 PasswordHash = passwordHash,
                 FavoriteReportPaths = current.FavoriteReportPaths,
-                IsSuperAdmin = current.IsSuperAdmin,
+                IsSuperAdmin = isSuperAdmin,
             };
 
             _users[index] = updated;
@@ -213,10 +248,35 @@ public class AuthService : IAuthService, IUserAdminService
                     return Task.FromResult<(bool, string?)>((false, "Cannot delete the last active admin"));
             }
 
+            if (current.IsSuperAdmin && !current.IsDisabled)
+            {
+                var otherEnabledSupers = _users.Count(u =>
+                    !u.Username.Equals(current.Username, StringComparison.OrdinalIgnoreCase)
+                    && u.IsSuperAdmin
+                    && !u.IsDisabled);
+                if (otherEnabledSupers == 0)
+                    return Task.FromResult<(bool, string?)>((false, "Cannot delete the last active Super Admin"));
+            }
+
             _users.RemoveAt(index);
             PersistUnlocked();
             return Task.FromResult<(bool, string?)>((true, null));
         }
+    }
+
+    /// <summary>Returns an error if actor is missing or not an active Super Admin.</summary>
+    private string? RequireActiveSuperAdmin(string? actorUsername)
+    {
+        if (string.IsNullOrWhiteSpace(actorUsername))
+            return "Only a Super Admin can grant or revoke Super Admin";
+
+        var actor = _users.FirstOrDefault(u =>
+            u.Username.Equals(actorUsername.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (actor is null || actor.IsDisabled || !actor.IsSuperAdmin)
+            return "Only a Super Admin can grant or revoke Super Admin";
+
+        return null;
     }
 
     private List<UserAccount> LoadOrSeed()
@@ -316,7 +376,7 @@ public class AuthService : IAuthService, IUserAdminService
         ClinicalReportCatalog.Normalize(paths);
 
     private static UserDto ToDto(UserAccount user) =>
-        new(user.Username, user.IsAdmin, user.IsDisabled);
+        new(user.Username, user.IsAdmin, user.IsDisabled, user.IsSuperAdmin);
 
     private static IReadOnlyList<string> ModulesForRole(bool isAdmin) =>
         isAdmin

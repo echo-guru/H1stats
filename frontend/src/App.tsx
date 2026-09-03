@@ -21,6 +21,7 @@ import AdminVersionHistory from './pages/AdminVersionHistory'
 import SystemHealth from './pages/SystemHealth'
 import ResearchHome from './pages/ResearchHome'
 import ResearchStudyEditor from './pages/ResearchStudyEditor'
+import WorkllistsHome from './pages/WorkllistsHome'
 
 function App() {
   return (
@@ -46,6 +47,7 @@ function App() {
               <Route path="/research" element={<ResearchHome />} />
               <Route path="/research/studies/new" element={<ResearchStudyEditor />} />
               <Route path="/research/studies/:id" element={<ResearchStudyEditor />} />
+              <Route path="/workllists" element={<WorkllistsHome />} />
               <Route path="/admin" element={<AdminHome />} />
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/database" element={<AdminDatabase />} />

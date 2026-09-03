@@ -74,6 +74,23 @@ public interface ICm2Repository
         string appointmentId, CancellationToken ct = default);
 
     /// <summary>
+    /// Unarrived pink (Cardiology) recalls from the Oracle diary.
+    /// Blank date range = all unarrived; optional site and PAT_CARDIOLOGIST filters.
+    /// </summary>
+    Task<PinkRecallWorklistResult> GetUnarrivedPinkRecallsAsync(
+        DateOnly? dateFrom = null,
+        DateOnly? dateTo = null,
+        string? site = null,
+        string? cardiologistId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Updates SCHEDULE_APPOINTMENT.APPOINTMENT_NOTE for a diary booking (max 2000 chars).
+    /// </summary>
+    Task<(bool Ok, string? Error)> UpdateAppointmentNoteAsync(
+        string appointmentId, string? note, CancellationToken ct = default);
+
+    /// <summary>
     /// Most recent previous consultation letter (CONSULT ⋈ LETTERS, LETTER_TYPE 6/7)
     /// before the upcoming appointment date. Semantic model: CM2_SEMANTIC_MODEL_UPDATED.
     /// </summary>
