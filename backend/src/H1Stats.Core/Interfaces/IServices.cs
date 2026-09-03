@@ -61,12 +61,37 @@ public interface ICm2Repository
     Task<DrSummaryReport> GetDrSummaryHistoryAsync(
         string? cardiologistId, int year, int month, CancellationToken ct = default);
     /// <summary>
+    /// James Report: Echo, SE/DSE, and consults by site for the current year (partial)
+    /// plus the prior two calendar years, broken down by quarter.
+    /// </summary>
+    Task<JamesReport> GetJamesReportAsync(CancellationToken ct = default);
+    /// <summary>
     /// Upcoming Initial / Follow-up consult diary bookings (SMS module pattern).
     /// </summary>
     Task<ResearchUpcomingConsultsResult> GetUpcomingConsultsAsync(
         DateOnly dateFrom, DateOnly dateTo, string? cardiologistId = null, CancellationToken ct = default);
     Task<ResearchUpcomingConsult?> GetUpcomingConsultByIdAsync(
         string appointmentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Most recent previous consultation letter (CONSULT ⋈ LETTERS, LETTER_TYPE 6/7)
+    /// before the upcoming appointment date. Semantic model: CM2_SEMANTIC_MODEL_UPDATED.
+    /// </summary>
+    Task<ResearchCm2LetterRef?> GetLatestConsultLetterAsync(
+        string patientRid, DateOnly? beforeDate = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Latest investigation with a REPORT_PATH for the given TEST_REQUIRED code(s).
+    /// Used only when consult-letter screening leaves criteria undetermined (TTE=1, stress=2/3).
+    /// </summary>
+    Task<ResearchCm2StudyReportRef?> GetLatestInvestigationReportAsync(
+        string patientRid, IReadOnlyList<int> testRequiredCodes, CancellationToken ct = default);
+
+    /// <summary>
+    /// Resolves a CM2 relative path (LETTER_PATH / REPORT_PATH) under Cm2ReportRoot.
+    /// Does not open or modify the file.
+    /// </summary>
+    bool TryResolveCm2FilePath(string relativePath, out string fullPath, out string error);
 }
 
 public interface IDatabaseConnectionService
@@ -88,15 +113,19 @@ public interface IResearchLlmClient
         CancellationToken ct = default);
 }
 
-/// <summary>Screens synthetic notes or a dummy RTF against active studies via the local LLM.</summary>
+/// <summary>Screens a CM2 consult appointment against active studies via the local LLM.</summary>
 public interface IResearchScreeningService
 {
-    SyntheticResearchPatient GetSyntheticPatient();
-    DummyRtfPreview GetDummyRtfPreview();
-    Task<SyntheticScreeningResult> ScreenSyntheticPatientAsync(CancellationToken ct = default);
-    Task<SyntheticScreeningResult> ScreenDummyRtfAsync(CancellationToken ct = default);
     Task<ResearchAppointmentScreeningResult> ScreenAppointmentAsync(
         string appointmentId, ScreenAppointmentRequest? request = null, CancellationToken ct = default);
+}
+
+/// <summary>One-at-a-time background batch over upcoming consults. Survives the HTTP request that started it.</summary>
+public interface IResearchScreeningJobService
+{
+    ResearchScreeningJob GetCurrent();
+    (ResearchScreeningJob Job, string? Error, bool Conflict) Start(StartResearchScreeningJobRequest request);
+    ResearchScreeningJob Cancel();
 }
 
 /// <summary>Persisted appointment screening results (JSON file until a DB is warranted).</summary>

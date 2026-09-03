@@ -12,6 +12,7 @@ import ReferrersGrowthCm2 from './pages/ReferrersGrowthCm2'
 import ReferrersDeclineCm2 from './pages/ReferrersDeclineCm2'
 import ReferrerHistoryCm2 from './pages/ReferrerHistoryCm2'
 import DrSummaryCm2 from './pages/DrSummaryCm2'
+import JamesReportCm2 from './pages/JamesReportCm2'
 import ClinicalHome from './pages/ClinicalHome'
 import AdminHome from './pages/AdminHome'
 import AdminUsers from './pages/AdminUsers'
@@ -36,6 +37,7 @@ function App() {
               <Route path="/clinical/physician-statistics" element={<PhysicianStatistics />} />
               <Route path="/clinical/reporting-dr-cm2" element={<ReportingDrCm2 />} />
               <Route path="/clinical/dr-summary-cm2" element={<DrSummaryCm2 />} />
+              <Route path="/clinical/james-report" element={<JamesReportCm2 />} />
               <Route path="/clinical/top-referring-doctors-cm2" element={<TopReferringDoctorsCm2 />} />
               <Route path="/clinical/top-referring-practices-cm2" element={<TopReferringPracticesCm2 />} />
               <Route path="/clinical/referrers-growth-cm2" element={<ReferrersGrowthCm2 />} />

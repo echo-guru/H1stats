@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange, ClipboardList, Star } from 'lucide-react'
+import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange, ClipboardList, Star, BarChart3 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useReportFavorites } from '../hooks/useReportFavorites'
 
@@ -28,6 +28,12 @@ const REPORTING_DR_ACTIONS: ClinicalAction[] = [
     description: 'Monthly OOS matrix by reporting cardiologist (Echo, DSE, SE, TEE, DCCS, Consults).',
     path: '/clinical/dr-summary-cm2',
     icon: ClipboardList,
+  },
+  {
+    title: 'James Report',
+    description: 'Site volumes by quarter — Echo, SE/DSE and consults for Greenslopes, Cleveland and Toowoomba (current + prior 2 years).',
+    path: '/clinical/james-report',
+    icon: BarChart3,
   },
 ]
 

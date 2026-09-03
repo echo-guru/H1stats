@@ -34,13 +34,13 @@ builder.Services.AddSingleton<IResearchStudyStore>(_ => new ResearchStudyStore(s
 builder.Services.AddSingleton<IResearchScreeningResultStore>(_ =>
     new ResearchScreeningResultStore(screeningResultsFilePath));
 builder.Services.AddScoped<ICm2Repository, Cm2Repository>();
+builder.Services.AddSingleton<IResearchScreeningJobService, ResearchScreeningJobService>();
 builder.Services.AddScoped<IResearchScreeningService>(sp =>
     new ResearchScreeningService(
         sp.GetRequiredService<IResearchLlmClient>(),
         sp.GetRequiredService<IResearchStudyStore>(),
         sp.GetRequiredService<IResearchScreeningResultStore>(),
-        sp.GetRequiredService<ICm2Repository>(),
-        builder.Environment.ContentRootPath));
+        sp.GetRequiredService<ICm2Repository>()));
 builder.Services.AddSingleton<IUserAdminService>(sp => (AuthService)sp.GetRequiredService<IAuthService>());
 builder.Services.AddSingleton<IDatabaseConnectionService, DatabaseConnectionService>();
 builder.Services.AddScoped<IPhysicianStatisticsRepository, PhysicianStatisticsRepository>();

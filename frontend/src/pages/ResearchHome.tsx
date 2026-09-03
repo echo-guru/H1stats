@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Microscope, CheckCircle, XCircle, RefreshCw, FlaskConical, Plus, ArrowRight, User, FileText, CalendarRange, ChevronDown, ChevronRight } from 'lucide-react'
+import { Microscope, CheckCircle, XCircle, RefreshCw, FlaskConical, Plus, ArrowRight, CalendarRange, ChevronDown, ChevronRight, Play, Square, Copy } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
 interface LlmStatus {
@@ -21,16 +21,13 @@ interface ResearchStudy {
   updatedAt: string
 }
 
-interface SyntheticPatient {
-  id: string
-  displayName: string
-  notes: string
-}
-
 interface CriterionAssessment {
   criterion: string
   status: string
   reason: string
+  evidenceSourceKind?: string | null
+  evidenceSourceRid?: string | null
+  evidenceFileName?: string | null
 }
 
 interface StudyScreening {
@@ -43,17 +40,19 @@ interface StudyScreening {
   error?: string | null
 }
 
-interface ScreeningResult {
-  patient: SyntheticPatient
-  studies: StudyScreening[]
-  error?: string | null
-  source?: string
-}
-
-interface DummyRtfPreview {
-  fileName: string
-  extractedText: string
-  error?: string | null
+interface SourceDocument {
+  kind: string
+  patientRid?: string | null
+  sourceRid?: string | null
+  sourceDate?: string | null
+  relativePath?: string | null
+  fileName?: string | null
+  title?: string | null
+  reviewed: boolean
+  extractError?: string | null
+  consultRid?: string | null
+  letterType?: number | null
+  testRequired?: number | null
 }
 
 interface UpcomingConsult {
@@ -68,8 +67,14 @@ interface UpcomingConsult {
   cardiologistName?: string | null
   appointmentNote?: string | null
   status: string
+  patientRid?: string | null
   screenedAt?: string | null
   studies?: StudyScreening[] | null
+  documentsReviewed?: SourceDocument[] | null
+  primaryLettersRid?: string | null
+  primaryLetterPath?: string | null
+  primaryLetterDate?: string | null
+  sourceFileFingerprint?: string | null
 }
 
 interface UpcomingConsultsResult {
@@ -77,6 +82,45 @@ interface UpcomingConsultsResult {
   dateTo: string
   count: number
   consults: UpcomingConsult[]
+}
+
+interface ScreeningJobItem {
+  appointmentId: string
+  status: string
+  error?: string | null
+  worklistStatus?: string | null
+  screenedAt?: string | null
+  alreadyReviewedSameSource?: boolean
+}
+
+interface ScreeningJob {
+  id: string
+  status: string
+  total: number
+  completed: number
+  skipped: number
+  failed: number
+  forceRescreen: boolean
+  startedAt?: string | null
+  finishedAt?: string | null
+  currentAppointmentId?: string | null
+  error?: string | null
+  items: ScreeningJobItem[]
+}
+
+type SavedScreening = {
+  appointmentId: string
+  status: string
+  screenedAt: string
+  studies: StudyScreening[]
+  source?: string
+  patientRid?: string | null
+  documentsReviewed?: SourceDocument[] | null
+  primaryLettersRid?: string | null
+  primaryLetterPath?: string | null
+  primaryLetterDate?: string | null
+  sourceFileFingerprint?: string | null
+  alreadyReviewedSameSource?: boolean
 }
 
 const CARDIOLOGIST_OPTIONS = [
@@ -121,13 +165,26 @@ function worklistStatusLabel(status: string): string {
     case 'NOT_ASSESSED':
       return 'Not assessed'
     case 'SUITABLE':
-      return 'Suitable'
+      return 'Likely suitable'
     case 'NOT_SUITABLE':
       return 'Not suitable'
     case 'UNCLEAR':
       return 'Unclear'
     default:
       return status.replace(/_/g, ' ')
+  }
+}
+
+function documentKindLabel(kind: string): string {
+  switch (kind) {
+    case 'CONSULT_LETTER':
+      return 'Consultation letter'
+    case 'TTE_REPORT':
+      return 'Transthoracic echo report'
+    case 'STRESS_ECHO_REPORT':
+      return 'Stress echo report'
+    default:
+      return kind.replace(/_/g, ' ')
   }
 }
 
@@ -140,9 +197,8 @@ function formatConsultDate(iso: string): string {
 function suitabilityClass(overall: string): string {
   switch (overall) {
     case 'LIKELY_SUITABLE':
-      return 'bg-emerald-50 text-emerald-800'
     case 'POSSIBLY_SUITABLE':
-      return 'bg-amber-50 text-amber-800'
+      return 'bg-emerald-50 text-emerald-800'
     case 'LIKELY_NOT_SUITABLE':
       return 'bg-red-50 text-red-800'
     default:
@@ -151,7 +207,121 @@ function suitabilityClass(overall: string): string {
 }
 
 function suitabilityLabel(overall: string): string {
-  return overall.replace(/_/g, ' ')
+  switch (overall) {
+    case 'LIKELY_SUITABLE':
+    case 'POSSIBLY_SUITABLE':
+      return 'Likely suitable'
+    case 'LIKELY_NOT_SUITABLE':
+      return 'Not suitable'
+    case 'NEEDS_REVIEW':
+      return 'Needs review'
+    default:
+      return overall.replace(/_/g, ' ')
+  }
+}
+
+function nextReviewOverall(current: string): string {
+  return current === 'LIKELY_SUITABLE' ? 'LIKELY_NOT_SUITABLE' : 'LIKELY_SUITABLE'
+}
+
+const SLACK_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function formatListPatientName(stored: string): string {
+  const trimmed = stored.trim()
+  const comma = trimmed.indexOf(',')
+  if (comma <= 0) return trimmed.toUpperCase()
+  const last = trimmed.slice(0, comma).trim().toUpperCase()
+  const first = trimmed.slice(comma + 1).trim()
+  return first ? `${last}, ${first}` : last
+}
+
+function slackPatientName(stored: string): string {
+  const trimmed = stored.trim()
+  const comma = trimmed.indexOf(',')
+  if (comma <= 0) return trimmed.toUpperCase()
+  const last = trimmed.slice(0, comma).trim().toUpperCase()
+  const first = trimmed.slice(comma + 1).trim()
+  return first && last ? `${first} ${last}` : trimmed
+}
+
+function slackDoctorHeading(name?: string | null): string {
+  const raw = (name || '').trim()
+  if (!raw) return 'Unassigned'
+  return /^dr\b/i.test(raw) ? raw : `Dr ${raw}`
+}
+
+function slackAppointmentDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  if (!m) return iso
+  return `${Number(m[3])} ${SLACK_MONTHS[Number(m[2]) - 1]} ${m[1]}`
+}
+
+function slackAppointmentTime(time?: string | null): string | null {
+  if (!time) return null
+  const m = /^(\d{1,2}):(\d{2})/.exec(time.trim())
+  if (!m) return time.trim()
+  let hour = Number(m[1])
+  const minute = m[2]
+  const suffix = hour >= 12 ? 'pm' : 'am'
+  hour = hour % 12
+  if (hour === 0) hour = 12
+  return `${hour}:${minute} ${suffix}`
+}
+
+/** Presentation label from stored study.overall (and existing UNCLEAR rows). Does not re-score. */
+function slackStudyClassification(study: StudyScreening): 'Suitable' | 'Likely Suitable' | null {
+  if (study.overall === 'LIKELY_SUITABLE') {
+    const unclear = study.inclusion.concat(study.exclusion).some((row) => row.status === 'UNCLEAR')
+    return unclear ? 'Likely Suitable' : 'Suitable'
+  }
+  if (study.overall === 'POSSIBLY_SUITABLE') return 'Likely Suitable'
+  return null
+}
+
+function buildCandidateSlack(consults: UpcomingConsult[]): string {
+  const linesByDoctor = new Map<string, string[]>()
+  const doctorOrder: string[] = []
+
+  for (const row of consults) {
+    if (row.status !== 'SUITABLE') continue
+
+    const positive = (row.studies ?? [])
+      .map((study) => {
+        const classification = slackStudyClassification(study)
+        return classification ? { studyName: study.studyName, classification } : null
+      })
+      .filter((item): item is { studyName: string; classification: 'Suitable' | 'Likely Suitable' } => item !== null)
+    if (positive.length === 0) continue
+
+    const heading = slackDoctorHeading(row.cardiologistName)
+    let lines = linesByDoctor.get(heading)
+    if (!lines) {
+      lines = []
+      linesByDoctor.set(heading, lines)
+      doctorOrder.push(heading)
+    }
+
+    const when = [slackAppointmentDate(row.appointmentDate), slackAppointmentTime(row.appointmentTime)]
+      .filter(Boolean)
+      .join(', ')
+    const name = slackPatientName(row.patientName)
+    for (const item of positive) {
+      lines.push(`- ${name} — ${when} — ${item.studyName} — **${item.classification}**`)
+    }
+  }
+
+  const parts = ["**Today's potential candidates**", '']
+  if (doctorOrder.length === 0) {
+    parts.push('None.')
+    return `${parts.join('\n')}\n`
+  }
+
+  for (const doctor of doctorOrder) {
+    parts.push(`**${doctor}**`)
+    parts.push(...(linesByDoctor.get(doctor) ?? []))
+    parts.push('')
+  }
+  return `${parts.join('\n').trimEnd()}\n`
 }
 
 export default function ResearchHome() {
@@ -160,13 +330,6 @@ export default function ResearchHome() {
   const [error, setError] = useState('')
   const [studies, setStudies] = useState<ResearchStudy[]>([])
   const [studiesError, setStudiesError] = useState('')
-  const [patient, setPatient] = useState<SyntheticPatient | null>(null)
-  const [dummyRtf, setDummyRtf] = useState<DummyRtfPreview | null>(null)
-  const [screening, setScreening] = useState<'notes' | 'rtf' | null>(null)
-  const [screenError, setScreenError] = useState('')
-  const [rtfScreenError, setRtfScreenError] = useState('')
-  const [result, setResult] = useState<ScreeningResult | null>(null)
-  const [rtfResult, setRtfResult] = useState<ScreeningResult | null>(null)
   const defaultRange = defaultConsultRange()
   const [consultFrom, setConsultFrom] = useState(defaultRange.from)
   const [consultTo, setConsultTo] = useState(defaultRange.to)
@@ -178,6 +341,19 @@ export default function ResearchHome() {
   const [expandedAppointmentId, setExpandedAppointmentId] = useState<string | null>(null)
   const [screeningAppointmentId, setScreeningAppointmentId] = useState<string | null>(null)
   const [appointmentScreenError, setAppointmentScreenError] = useState('')
+  const [batchJob, setBatchJob] = useState<ScreeningJob | null>(null)
+  const [batchError, setBatchError] = useState('')
+  const [rescreenAlreadyAssessed, setRescreenAlreadyAssessed] = useState(false)
+  const [copyResultsLabel, setCopyResultsLabel] = useState<'idle' | 'copied'>('idle')
+  const appliedBatchItems = useRef<Set<string>>(new Set())
+  const copyResultsTimer = useRef<number>(0)
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(copyResultsTimer.current)
+    },
+    [],
+  )
 
   const loadStatus = useCallback(async () => {
     setLoading(true)
@@ -208,53 +384,10 @@ export default function ResearchHome() {
     }
   }, [])
 
-  const loadPatient = useCallback(async () => {
-    try {
-      const res = await fetch('/api/research/synthetic-patient')
-      if (!res.ok) throw new Error('Failed to load synthetic patient')
-      setPatient((await res.json()) as SyntheticPatient)
-    } catch {
-      setPatient(null)
-    }
-  }, [])
-
-  const loadDummyRtf = useCallback(async () => {
-    try {
-      const res = await fetch('/api/research/dummy-rtf')
-      if (!res.ok) throw new Error('Failed to load dummy RTF')
-      setDummyRtf((await res.json()) as DummyRtfPreview)
-    } catch {
-      setDummyRtf(null)
-    }
-  }, [])
-
   useEffect(() => {
     void loadStatus()
     void loadStudies()
-    void loadPatient()
-    void loadDummyRtf()
-  }, [loadStatus, loadStudies, loadPatient, loadDummyRtf])
-
-  const runScreening = async (
-    path: string,
-    source: 'notes' | 'rtf',
-    setErr: (value: string) => void,
-    setOut: (value: ScreeningResult | null) => void,
-  ) => {
-    setScreening(source)
-    setErr('')
-    try {
-      const res = await fetch(path, { method: 'POST' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.message || 'Screening failed')
-      setOut(data as ScreeningResult)
-    } catch (e) {
-      setOut(null)
-      setErr(e instanceof Error ? e.message : 'Screening failed')
-    } finally {
-      setScreening(null)
-    }
-  }
+  }, [loadStatus, loadStudies])
 
   const loadUpcomingConsults = useCallback(async () => {
     setConsultsLoading(true)
@@ -279,36 +412,92 @@ export default function ResearchHome() {
     }
   }, [consultFrom, consultTo, consultCardiologist])
 
-  const screenAppointment = async (appointmentId: string) => {
+  const applySavedScreening = useCallback((saved: SavedScreening) => {
+    setConsults((prev) =>
+      prev.map((row) =>
+        row.appointmentId === saved.appointmentId
+          ? {
+              ...row,
+              status: saved.status,
+              screenedAt: saved.screenedAt,
+              studies: saved.studies,
+              patientRid: saved.patientRid ?? row.patientRid,
+              documentsReviewed: saved.documentsReviewed ?? row.documentsReviewed,
+              primaryLettersRid: saved.primaryLettersRid ?? row.primaryLettersRid,
+              primaryLetterPath: saved.primaryLetterPath ?? row.primaryLetterPath,
+              primaryLetterDate: saved.primaryLetterDate ?? row.primaryLetterDate,
+              sourceFileFingerprint: saved.sourceFileFingerprint ?? row.sourceFileFingerprint,
+            }
+          : row,
+      ),
+    )
+  }, [])
+
+  const pullFinishedBatchResults = useCallback(
+    async (job: ScreeningJob) => {
+      const finished = job.items.filter(
+        (item) =>
+          (item.status === 'DONE' || item.status === 'SKIPPED') &&
+          !appliedBatchItems.current.has(`${job.id}:${item.appointmentId}`),
+      )
+      for (const item of finished) {
+        appliedBatchItems.current.add(`${job.id}:${item.appointmentId}`)
+        try {
+          const res = await fetch(
+            `/api/research/upcoming-consults/${encodeURIComponent(item.appointmentId)}/screening`,
+          )
+          if (!res.ok) continue
+          const saved = (await res.json()) as SavedScreening
+          applySavedScreening(saved)
+        } catch {
+          /* keep polling; the next pass can retry */
+          appliedBatchItems.current.delete(`${job.id}:${item.appointmentId}`)
+        }
+      }
+    },
+    [applySavedScreening],
+  )
+
+  const loadCurrentBatchJob = useCallback(async () => {
+    const res = await fetch('/api/research/screening-jobs/current')
+    if (!res.ok) return null
+    const job = (await res.json()) as ScreeningJob
+    if (!job?.id) {
+      setBatchJob(job?.status && job.status !== 'IDLE' ? job : null)
+      return job
+    }
+    setBatchJob(job)
+    await pullFinishedBatchResults(job)
+    return job
+  }, [pullFinishedBatchResults])
+
+  useEffect(() => {
+    void loadCurrentBatchJob()
+  }, [loadCurrentBatchJob])
+
+  useEffect(() => {
+    if (batchJob?.status !== 'RUNNING') return undefined
+    const timer = window.setInterval(() => {
+      void loadCurrentBatchJob()
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [batchJob?.status, loadCurrentBatchJob])
+
+  const screenAppointment = async (appointmentId: string, opts?: { force?: boolean; full?: boolean }) => {
     setScreeningAppointmentId(appointmentId)
     setAppointmentScreenError('')
     try {
       const res = await fetch(`/api/research/upcoming-consults/${encodeURIComponent(appointmentId)}/screen`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ useSampleNotes: true }),
+        body: JSON.stringify({
+          forceRescreen: Boolean(opts?.force),
+          fullScreen: Boolean(opts?.full),
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.message || 'Screening failed')
-      const saved = data as {
-        appointmentId: string
-        status: string
-        screenedAt: string
-        studies: StudyScreening[]
-        source?: string
-      }
-      setConsults((prev) =>
-        prev.map((row) =>
-          row.appointmentId === appointmentId
-            ? {
-                ...row,
-                status: saved.status,
-                screenedAt: saved.screenedAt,
-                studies: saved.studies,
-              }
-            : row,
-        ),
-      )
+      applySavedScreening(data as SavedScreening)
       setExpandedAppointmentId(appointmentId)
     } catch (e) {
       setAppointmentScreenError(e instanceof Error ? e.message : 'Screening failed')
@@ -317,9 +506,78 @@ export default function ResearchHome() {
     }
   }
 
+  const startBatchScreen = async () => {
+    setBatchError('')
+    setAppointmentScreenError('')
+    const ids = rescreenAlreadyAssessed
+      ? consults.map((row) => row.appointmentId)
+      : consults.filter((row) => !row.studies?.length).map((row) => row.appointmentId)
+    if (ids.length === 0) {
+      setBatchError(
+        rescreenAlreadyAssessed
+          ? 'There are no consults in this list to screen.'
+          : 'Every consult in this list is already screened. Tick “Re-screen already assessed” to run them again.',
+      )
+      return
+    }
+    appliedBatchItems.current = new Set()
+    setCopyResultsLabel('idle')
+    window.clearTimeout(copyResultsTimer.current)
+    try {
+      const res = await fetch('/api/research/screening-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentIds: ids,
+          forceRescreen: rescreenAlreadyAssessed,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Could not start batch screening')
+      const job = (data as ScreeningJob) ?? (data.job as ScreeningJob)
+      setBatchJob(job)
+    } catch (e) {
+      setBatchError(e instanceof Error ? e.message : 'Could not start batch screening')
+    }
+  }
+
+  const cancelBatchScreen = async () => {
+    setBatchError('')
+    try {
+      const res = await fetch('/api/research/screening-jobs/current/cancel', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Could not cancel batch')
+      setBatchJob(data as ScreeningJob)
+    } catch (e) {
+      setBatchError(e instanceof Error ? e.message : 'Could not cancel batch')
+    }
+  }
+
+  const copyBatchResults = async () => {
+    if (!batchJob || batchJob.status !== 'COMPLETED') return
+    const text = buildCandidateSlack(consults)
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopyResultsLabel('copied')
+      window.clearTimeout(copyResultsTimer.current)
+      copyResultsTimer.current = window.setTimeout(() => setCopyResultsLabel('idle'), 2000)
+    } catch {
+      setBatchError('Could not copy results to the clipboard.')
+    }
+  }
+
   const online = Boolean(status?.online)
   const activeCount = studies.filter((study) => study.isActive).length
-  const busy = screening !== null || screeningAppointmentId !== null
+  const batchBusy = batchJob?.status === 'RUNNING'
+  const busy = screeningAppointmentId !== null || batchBusy
+  const remainingCount = consults.filter((row) => !row.studies?.length).length
+  const batchTargetCount = rescreenAlreadyAssessed ? consults.length : remainingCount
+  const batchProcessed = batchJob ? batchJob.completed + batchJob.skipped + batchJob.failed : 0
+  const currentBatchName = batchJob?.currentAppointmentId
+    ? formatListPatientName(
+        consults.find((row) => row.appointmentId === batchJob.currentAppointmentId)?.patientName || '',
+      )
+    : ''
 
   return (
     <div className="space-y-6">
@@ -369,7 +627,8 @@ export default function ResearchHome() {
           <div>
             <h3 className="text-lg font-semibold text-brand-accent">Upcoming consults</h3>
             <p className="text-sm text-gray-600">
-              CM2 diary bookings for Initial and Follow-up consults. Status is saved after screening and restored on load.
+              CM2 diary bookings for Initial and Follow-up consults. Screening reads the most recent previous
+              consultation letter (read-only) and saves the result against that LETTER_PATH.
             </p>
           </div>
         </div>
@@ -424,13 +683,96 @@ export default function ResearchHome() {
 
         {consults.length > 0 && (
           <div className="border border-brand-primary-border rounded-lg overflow-hidden">
-            <div className="px-3 py-2 bg-gray-50 text-xs font-semibold text-brand-primary flex justify-between">
+            <div className="px-3 py-2 bg-gray-50 text-xs font-semibold text-brand-primary flex flex-wrap items-center justify-between gap-2">
               <span>{consults.length} consult{consults.length === 1 ? '' : 's'}</span>
-              <span>Click a row for screening detail</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1.5 font-normal text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={rescreenAlreadyAssessed}
+                    onChange={(e) => setRescreenAlreadyAssessed(e.target.checked)}
+                    disabled={batchBusy}
+                    className="rounded border-gray-300 text-brand-primary focus:ring-brand-primary"
+                  />
+                  Re-screen already assessed
+                </label>
+                {batchBusy ? (
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void cancelBatchScreen()}>
+                    <Square className="h-3.5 w-3.5" />
+                    Cancel batch
+                  </Button>
+                ) : (
+                  <Button
+                    variant="brand"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={!online || activeCount === 0 || busy || batchTargetCount === 0}
+                    onClick={() => void startBatchScreen()}
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    Screen all{batchTargetCount > 0 ? ` (${batchTargetCount})` : ''}
+                  </Button>
+                )}
+              </div>
             </div>
+
+            {(batchBusy || (batchJob && batchJob.status !== 'IDLE')) && batchJob?.id ? (
+              <div className="px-3 py-2 border-t border-brand-primary-border bg-white space-y-1.5">
+                <div className="flex justify-between gap-3 text-xs text-gray-700 items-center">
+                  <span>
+                    {batchBusy
+                      ? `Screening ${Math.min(batchProcessed + 1, batchJob.total)} of ${batchJob.total}${currentBatchName ? ` — ${currentBatchName}` : ''}`
+                      : batchJob.status === 'CANCELLED'
+                        ? `Batch cancelled after ${batchProcessed} of ${batchJob.total}`
+                        : `Batch finished: ${batchJob.completed} screened, ${batchJob.skipped} skipped, ${batchJob.failed} failed`}
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-gray-500">
+                      {batchJob.completed} done · {batchJob.skipped} skipped · {batchJob.failed} failed
+                    </span>
+                    {batchJob.status === 'COMPLETED' && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 h-7"
+                        onClick={() => void copyBatchResults()}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        {copyResultsLabel === 'copied' ? 'Copied!' : 'Copy Results'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                  <div
+                    className="h-full bg-brand-primary transition-all"
+                    style={{
+                      width: `${batchJob.total === 0 ? 0 : Math.round((batchProcessed / batchJob.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+                {batchJob.error && <p className="text-xs text-red-700">{batchJob.error}</p>}
+                {batchBusy && (
+                  <p className="text-xs text-gray-500">
+                    Running in the background on the H1Stats API. You can keep using this page; results appear as each
+                    consult finishes.
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+            {batchError && (
+              <p className="px-3 py-2 text-sm text-red-600 bg-red-50 border-t border-red-100">{batchError}</p>
+            )}
+
             <ul className="divide-y divide-gray-100">
               {consults.map((row) => {
                 const open = expandedAppointmentId === row.appointmentId
+                const batchItem = batchJob?.items.find((item) => item.appointmentId === row.appointmentId)
+                const rowScreening =
+                  screeningAppointmentId === row.appointmentId || batchItem?.status === 'RUNNING'
+                const rowQueued = batchBusy && batchItem?.status === 'PENDING'
                 return (
                   <li key={row.appointmentId}>
                     <button
@@ -447,7 +789,7 @@ export default function ResearchHome() {
                       )}
                       <div className="min-w-0 flex-1 grid grid-cols-1 md:grid-cols-12 gap-1 md:gap-3">
                         <div className="md:col-span-3">
-                          <p className="text-sm font-medium text-brand-accent truncate">{row.patientName}</p>
+                          <p className="text-sm font-medium text-brand-accent truncate">{formatListPatientName(row.patientName)}</p>
                           <p className="text-xs text-gray-500">PAT {row.patientCmId || '—'}</p>
                         </div>
                         <div className="md:col-span-3 text-sm text-gray-700">
@@ -490,21 +832,34 @@ export default function ResearchHome() {
                             variant="brand"
                             size="sm"
                             disabled={busy || !online || activeCount === 0}
-                            onClick={() => void screenAppointment(row.appointmentId)}
+                            onClick={() =>
+                              void screenAppointment(row.appointmentId, {
+                                force: Boolean(row.studies?.length),
+                                full: Boolean(row.studies?.length),
+                              })
+                            }
                           >
-                            {screeningAppointmentId === row.appointmentId
+                            {rowScreening
                               ? 'Screening…'
-                              : row.studies?.length
-                                ? 'Re-screen with sample notes'
-                                : 'Screen with sample notes'}
+                              : rowQueued
+                                ? 'Queued in batch'
+                                : row.studies?.length
+                                  ? 'Re-screen for suitability'
+                                  : 'Screen for suitability'}
                           </Button>
                           <span className="text-xs text-gray-500">
-                            Uses Sample RTF notes until CM2 consult letters are wired. Results are saved for this appointment.
+                            Stops after any inclusion criterion is not met. UNCLEAR rows still pull extra reports.
+                            Re-screen runs a full assessment of every criterion.
                           </span>
                         </div>
 
-                        {screeningAppointmentId === row.appointmentId && (
+                        {rowScreening && (
                           <p className="text-sm text-gray-600">Qwen is assessing this appointment. This can take a minute or two.</p>
+                        )}
+                        {batchItem?.status === 'FAILED' && batchItem.error && (
+                          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                            {batchItem.error}
+                          </p>
                         )}
                         {appointmentScreenError && expandedAppointmentId === row.appointmentId && (
                           <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
@@ -512,14 +867,45 @@ export default function ResearchHome() {
                           </p>
                         )}
 
+                        {(row.primaryLetterPath || (row.documentsReviewed && row.documentsReviewed.length > 0)) && (
+                          <div className="rounded-lg border border-brand-primary-border bg-white px-3 py-2 space-y-1">
+                            <p className="text-xs font-semibold text-brand-primary">Documents reviewed</p>
+                            {row.primaryLetterPath && (
+                              <p className="text-xs text-gray-700">
+                                Letter {row.primaryLettersRid ? `#${row.primaryLettersRid}` : ''}
+                                {row.primaryLetterDate ? ` · ${formatConsultDate(row.primaryLetterDate)}` : ''}
+                                {' · '}
+                                <span className="font-mono">{row.primaryLetterPath}</span>
+                              </p>
+                            )}
+                            {row.patientRid && (
+                              <p className="text-xs text-gray-500">PATIENT_RID {row.patientRid}</p>
+                            )}
+                            {row.documentsReviewed?.map((doc) => (
+                              <p key={`${doc.kind}-${doc.sourceRid}-${doc.relativePath}`} className="text-xs text-gray-600">
+                                {documentKindLabel(doc.kind)}
+                                {doc.reviewed ? '' : ' (not read)'}
+                                {doc.fileName ? ` · ${doc.fileName}` : ''}
+                                {doc.sourceDate ? ` · ${formatConsultDate(doc.sourceDate)}` : ''}
+                                {doc.extractError ? ` — ${doc.extractError}` : ''}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+
                         {row.studies && row.studies.length > 0 ? (
                           <div className="space-y-3">
                             {row.screenedAt && (
                               <p className="text-xs text-gray-500">
                                 Screened {new Date(row.screenedAt).toLocaleString()}
+                                {row.sourceFileFingerprint ? ' · source file recorded' : ''}
                               </p>
                             )}
-                            <ScreeningStudies studies={row.studies} />
+                            <ScreeningStudies
+                              appointmentId={row.appointmentId}
+                              studies={row.studies}
+                              onUpdated={applySavedScreening}
+                            />
                           </div>
                         ) : (
                           <p className="text-sm text-gray-600">
@@ -540,93 +926,6 @@ export default function ResearchHome() {
             </ul>
           </div>
         )}
-      </section>
-
-      <section className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-6 space-y-4 max-w-3xl">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="rounded-lg bg-brand-primary-light p-2.5">
-              <User className="h-6 w-6 text-brand-primary" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-brand-accent">Synthetic screening</h3>
-              <p className="text-sm text-gray-600">
-                Made-up notes only. Qwen will score this patient against every active study.
-              </p>
-            </div>
-          </div>
-          <Button
-            variant="brand"
-            onClick={() => void runScreening('/api/research/screen-synthetic', 'notes', setScreenError, setResult)}
-            disabled={busy || !online || activeCount === 0}
-          >
-            {screening === 'notes' ? 'Screening…' : 'Screen synthetic patient'}
-          </Button>
-        </div>
-
-        {patient && (
-          <div>
-            <p className="text-sm font-medium text-brand-primary mb-1">
-              {patient.displayName} ({patient.id})
-            </p>
-            <pre className="text-xs text-gray-700 whitespace-pre-wrap bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 max-h-56 overflow-auto">
-              {patient.notes}
-            </pre>
-          </div>
-        )}
-
-        {screening === 'notes' && (
-          <p className="text-sm text-gray-600">Qwen is assessing the synthetic patient. This can take a minute or two.</p>
-        )}
-        {screenError && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{screenError}</p>
-        )}
-
-        <ScreeningStudies studies={result?.studies} />
-      </section>
-
-      <section className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-6 space-y-4 max-w-3xl">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="rounded-lg bg-brand-primary-light p-2.5">
-              <FileText className="h-6 w-6 text-brand-primary" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-brand-accent">Dummy RTF screening</h3>
-              <p className="text-sm text-gray-600">
-                Word-format sample from Sample RTF, not a real CM2 report. H1Stats extracts the text, then Qwen screens it.
-              </p>
-            </div>
-          </div>
-          <Button
-            variant="brand"
-            onClick={() => void runScreening('/api/research/screen-dummy-rtf', 'rtf', setRtfScreenError, setRtfResult)}
-            disabled={busy || !online || activeCount === 0 || !dummyRtf?.extractedText}
-          >
-            {screening === 'rtf' ? 'Screening…' : 'Screen dummy RTF'}
-          </Button>
-        </div>
-
-        {dummyRtf?.error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{dummyRtf.error}</p>
-        )}
-        {dummyRtf?.extractedText && (
-          <div>
-            <p className="text-sm font-medium text-brand-primary mb-1">Extracted from {dummyRtf.fileName}</p>
-            <pre className="text-xs text-gray-700 whitespace-pre-wrap bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 max-h-56 overflow-auto">
-              {dummyRtf.extractedText}
-            </pre>
-          </div>
-        )}
-
-        {screening === 'rtf' && (
-          <p className="text-sm text-gray-600">Qwen is assessing the extracted RTF text. This can take a minute or two.</p>
-        )}
-        {rtfScreenError && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{rtfScreenError}</p>
-        )}
-
-        <ScreeningStudies studies={rtfResult?.studies} />
       </section>
 
       <section className="space-y-4">
@@ -684,29 +983,89 @@ export default function ResearchHome() {
   )
 }
 
-function ScreeningStudies({ studies }: { studies?: StudyScreening[] }) {
+function ScreeningStudies({
+  appointmentId,
+  studies,
+  onUpdated,
+}: {
+  appointmentId: string
+  studies?: StudyScreening[]
+  onUpdated: (saved: SavedScreening) => void
+}) {
+  const [pendingStudyId, setPendingStudyId] = useState<string | null>(null)
+  const [overrideError, setOverrideError] = useState('')
+
   if (!studies?.length) return null
+
+  const toggleSuitability = async (study: StudyScreening) => {
+    setPendingStudyId(study.studyId)
+    setOverrideError('')
+    try {
+      const res = await fetch(
+        `/api/research/upcoming-consults/${encodeURIComponent(appointmentId)}/screening/suitability`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studyId: study.studyId,
+            overall: nextReviewOverall(study.overall),
+          }),
+        },
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Could not update suitability')
+      onUpdated(data as SavedScreening)
+    } catch (e) {
+      setOverrideError(e instanceof Error ? e.message : 'Could not update suitability')
+    } finally {
+      setPendingStudyId(null)
+    }
+  }
+
   return (
     <>
+      {overrideError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{overrideError}</p>
+      )}
       {studies.map((study) => (
         <div key={study.studyId} className="border border-brand-primary-border rounded-lg p-4 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <h4 className="font-semibold text-brand-accent">{study.studyName}</h4>
-            <span className={`text-xs font-semibold px-2 py-1 rounded ${suitabilityClass(study.overall)}`}>
-              {suitabilityLabel(study.overall)}
-            </span>
+            <button
+              type="button"
+              title="Click to mark Suitable or Not suitable"
+              disabled={pendingStudyId === study.studyId}
+              onClick={() => void toggleSuitability(study)}
+              className={`text-xs font-semibold px-2 py-1 rounded ${suitabilityClass(study.overall)} hover:ring-2 hover:ring-brand-primary/40 disabled:opacity-60`}
+            >
+              {pendingStudyId === study.studyId ? 'Saving…' : suitabilityLabel(study.overall)}
+            </button>
           </div>
           <p className="text-sm text-gray-700">{study.summary}</p>
           {study.error && <p className="text-sm text-red-700">{study.error}</p>}
           <CriterionList title="Inclusion" items={study.inclusion} />
-          <CriterionList title="Exclusion" items={study.exclusion} />
+          <CriterionList title="Exclusion" items={study.exclusion} isExclusion />
         </div>
       ))}
     </>
   )
 }
 
-function CriterionList({ title, items }: { title: string; items: CriterionAssessment[] }) {
+function criterionStatusClass(status: string, isExclusion: boolean): string {
+  if (status === 'UNCLEAR') return 'text-orange-800'
+  const favourable = isExclusion ? status === 'NOT_MET' : status === 'MET'
+  return favourable ? 'text-emerald-700' : 'text-red-700'
+}
+
+function CriterionList({
+  title,
+  items,
+  isExclusion = false,
+}: {
+  title: string
+  items: CriterionAssessment[]
+  isExclusion?: boolean
+}) {
   if (items.length === 0) return null
   return (
     <div>
@@ -714,10 +1073,18 @@ function CriterionList({ title, items }: { title: string; items: CriterionAssess
       <ul className="space-y-1">
         {items.map((item) => (
           <li key={`${title}-${item.criterion}`} className="text-sm text-gray-700">
-            <span className="font-medium">{item.status.replace(/_/g, ' ')}</span>
+            <span className={`font-semibold ${criterionStatusClass(item.status, isExclusion)}`}>
+              {item.status.replace(/_/g, ' ')}
+            </span>
             {': '}
             {item.criterion}
             {item.reason ? ` — ${item.reason}` : ''}
+            {item.evidenceFileName || item.evidenceSourceKind ? (
+              <span className="text-xs text-gray-500">
+                {' '}
+                [{item.evidenceFileName || documentKindLabel(item.evidenceSourceKind || '')}]
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>

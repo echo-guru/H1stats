@@ -3,67 +3,6 @@ using System.Text;
 
 namespace H1Stats.Infrastructure.Research;
 
-/// <summary>
-/// Loads the Word-format dummy consult from the repo Sample RTF folder. Never a real CM2 file.
-/// </summary>
-public static class DummyResearchRtf
-{
-    public const string FolderName = "Sample RTF";
-    public const string FileName = "sample consult.rtf";
-
-    public static bool TryLoad(string? contentRoot, out string path, out string rtf, out string? error)
-    {
-        path = FindPath(contentRoot) ?? "";
-        rtf = "";
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            error = $"Could not find {FileName} in a {FolderName} folder.";
-            return false;
-        }
-
-        try
-        {
-            rtf = File.ReadAllText(path, Encoding.Latin1);
-            error = null;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = $"Could not read {Path.GetFileName(path)}: {ex.Message}";
-            return false;
-        }
-    }
-
-    public static string? FindPath(string? contentRoot)
-    {
-        var starts = new[] { contentRoot, Directory.GetCurrentDirectory(), AppContext.BaseDirectory }
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Select(s => s!)
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var start in starts)
-        {
-            var dir = new DirectoryInfo(start);
-            while (dir is not null)
-            {
-                var folder = Path.Combine(dir.FullName, FolderName);
-                if (Directory.Exists(folder))
-                {
-                    var preferred = Path.Combine(folder, FileName);
-                    if (File.Exists(preferred))
-                        return preferred;
-                    var first = Directory.GetFiles(folder, "*.rtf").FirstOrDefault();
-                    if (first is not null)
-                        return first;
-                }
-                dir = dir.Parent;
-            }
-        }
-
-        return null;
-    }
-}
-
 /// <summary>Strips RTF control words and destinations to plain text for LLM screening.</summary>
 public static class RtfTextExtractor
 {

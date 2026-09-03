@@ -1687,6 +1687,9 @@ public class Cm2Repository : ICm2Repository
         return candidates.FirstOrDefault(File.Exists);
     }
 
+    /// <summary>
+    /// Resolves LETTER_PATH / REPORT_PATH under Cm2ReportRoot. Does not open or modify the file.
+    /// </summary>
     private bool TryBuildReportFullPath(string reportPath, out string fullPath, out string error)
     {
         fullPath = "";
@@ -1704,7 +1707,7 @@ public class Cm2Repository : ICm2Repository
             || relative.Contains("..", StringComparison.Ordinal)
             || Path.IsPathRooted(relative) && relative.Contains(':'))
         {
-            error = "Invalid report path.";
+            error = "Invalid CM2 file path.";
             return false;
         }
 
@@ -1712,7 +1715,7 @@ public class Cm2Repository : ICm2Repository
         var combined = Path.GetFullPath(Path.Combine(rootFull, relative));
         if (!combined.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
         {
-            error = "Invalid report path.";
+            error = "Invalid CM2 file path.";
             return false;
         }
 
@@ -2071,6 +2074,177 @@ public class Cm2Repository : ICm2Repository
             acc.UnassignedDccs);
     }
 
+    public async Task<JamesReport> GetJamesReportAsync(CancellationToken ct = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var currentYear = today.Year;
+        var dateFrom = new DateOnly(currentYear - 2, 1, 1);
+        var dateToExclusive = today.AddDays(1);
+        var dateFromDt = dateFrom.ToDateTime(TimeOnly.MinValue);
+        var dateToExclusiveDt = dateToExclusive.ToDateTime(TimeOnly.MinValue);
+
+        // siteId → (year, quarter) → (echo, seDse, consults)
+        var counts = new Dictionary<string, Dictionary<(int Year, int Quarter), (int Echo, int SeDse, int Consults)>>(
+            StringComparer.OrdinalIgnoreCase);
+
+        void Ensure(string siteId, int year, int quarter)
+        {
+            if (!counts.TryGetValue(siteId, out var byQ))
+            {
+                byQ = new Dictionary<(int, int), (int, int, int)>();
+                counts[siteId] = byQ;
+            }
+            if (!byQ.ContainsKey((year, quarter)))
+                byQ[(year, quarter)] = (0, 0, 0);
+        }
+
+        void AddEchoSe(string siteId, int year, int quarter, int echo, int seDse)
+        {
+            Ensure(siteId, year, quarter);
+            var cur = counts[siteId][(year, quarter)];
+            counts[siteId][(year, quarter)] = (cur.Echo + echo, cur.SeDse + seDse, cur.Consults);
+        }
+
+        void AddConsults(string siteId, int year, int quarter, int consults)
+        {
+            Ensure(siteId, year, quarter);
+            var cur = counts[siteId][(year, quarter)];
+            counts[siteId][(year, quarter)] = (cur.Echo, cur.SeDse, cur.Consults + consults);
+        }
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+
+        // Echo (TTE=1) and SE/DSE (2+3) from completed studies by TEST.SITE.
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT
+                    TRIM(TO_CHAR(t.SITE)) AS SiteId,
+                    EXTRACT(YEAR FROM t.TEST_DATE) AS Yr,
+                    TO_NUMBER(TO_CHAR(t.TEST_DATE, 'Q')) AS Qtr,
+                    COUNT(DISTINCT CASE WHEN t.TEST_REQUIRED = 1 THEN t.TEST_RID END) AS EchoCount,
+                    COUNT(DISTINCT CASE WHEN t.TEST_REQUIRED IN (2, 3) THEN t.TEST_RID END) AS SeDseCount
+                FROM {Schema}.TEST t
+                WHERE t.TEST_DATE >= :DateFrom
+                  AND t.TEST_DATE < :DateToExclusive
+                  AND t.TEST_REQUIRED IN (1, 2, 3)
+                  AND t.SITE IN (1, 2, 3)
+                GROUP BY
+                    TRIM(TO_CHAR(t.SITE)),
+                    EXTRACT(YEAR FROM t.TEST_DATE),
+                    TO_NUMBER(TO_CHAR(t.TEST_DATE, 'Q'))
+                """;
+            cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFromDt;
+            cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateToExclusiveDt;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var siteId = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
+                if (string.IsNullOrWhiteSpace(siteId)) continue;
+                var year = Convert.ToInt32(reader.GetValue(1));
+                var quarter = Convert.ToInt32(reader.GetValue(2));
+                var echo = Convert.ToInt32(reader.GetValue(3));
+                var seDse = Convert.ToInt32(reader.GetValue(4));
+                AddEchoSe(siteId, year, quarter, echo, seDse);
+            }
+        }
+
+        // Consults by campus: diary bookings (same title patterns as Research / GPH SMS).
+        // CONSULT/LETTERS have no SITE; room → SCHEDULE_SITE is the campus grain.
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.BindByName = true;
+            cmd.CommandText = $"""
+                SELECT
+                    TRIM(TO_CHAR(ST.SCHEDULE_SITE_RID)) AS SiteId,
+                    EXTRACT(YEAR FROM A.APPOINTMENT_DATE) AS Yr,
+                    TO_NUMBER(TO_CHAR(A.APPOINTMENT_DATE, 'Q')) AS Qtr,
+                    COUNT(*) AS ConsultCount
+                FROM {Schema}.SCHEDULE_APPOINTMENT A
+                JOIN {Schema}.PATIENT P
+                  ON P.PATIENT_RID = A.PATIENT_RID
+                LEFT JOIN {Schema}.SCHEDULE_OCC_SERVICE S
+                  ON S.SCHEDULE_OCC_SERVICE_RID = A.SCHEDULE_OCC_SERVICE_RID
+                LEFT JOIN {Schema}.SCHEDULE_ROOM R
+                  ON R.SCHEDULE_ROOM_RID = A.SCHEDULE_ROOM_RID
+                LEFT JOIN {Schema}.SCHEDULE_SITE ST
+                  ON ST.SCHEDULE_SITE_RID = R.SCHEDULE_SITE_RID
+                WHERE A.APPOINTMENT_DATE >= :DateFrom
+                  AND A.APPOINTMENT_DATE < :DateToExclusive
+                  AND UPPER(TRIM(NVL(P.PAT_FIRSTNAME, ' '))) <> 'AADMIN'
+                  AND ST.SCHEDULE_SITE_RID IN (1, 2, 3)
+                  AND (
+                        REGEXP_LIKE(UPPER(NVL(S.OCC_SERVICE_TITLE, '')), 'INITIAL[[:space:]-]*CONSULT')
+                     OR REGEXP_LIKE(UPPER(NVL(S.OCC_SERVICE_TITLE, '')), 'FOLLOW[[:space:]-]*UP[[:space:]-]*CONSULT')
+                     OR REGEXP_LIKE(UPPER(NVL(S.OCC_SERVICE_TITLE, '')), 'FOLLOW[[:space:]-]*UP[[:space:]-]*-[[:space:]-]*NEW[[:space:]-]*REFERRAL')
+                     OR UPPER(NVL(S.OCC_SERVICE_TITLE, '')) LIKE '%CONSULT%'
+                     OR UPPER(NVL(S.OCC_SERVICE_TITLE, '')) LIKE '%NEW REFERRAL%'
+                      )
+                GROUP BY
+                    TRIM(TO_CHAR(ST.SCHEDULE_SITE_RID)),
+                    EXTRACT(YEAR FROM A.APPOINTMENT_DATE),
+                    TO_NUMBER(TO_CHAR(A.APPOINTMENT_DATE, 'Q'))
+                """;
+            cmd.Parameters.Add("DateFrom", OracleDbType.Date).Value = dateFromDt;
+            cmd.Parameters.Add("DateToExclusive", OracleDbType.Date).Value = dateToExclusiveDt;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var siteId = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
+                if (string.IsNullOrWhiteSpace(siteId)) continue;
+                var year = Convert.ToInt32(reader.GetValue(1));
+                var quarter = Convert.ToInt32(reader.GetValue(2));
+                var consults = Convert.ToInt32(reader.GetValue(3));
+                AddConsults(siteId, year, quarter, consults);
+            }
+        }
+
+        var siteSections = new List<JamesReportSiteSection>();
+        foreach (var (code, displayName) in Cm2SiteMapping.All)
+        {
+            var years = new List<JamesReportYearBlock>();
+            for (var year = currentYear - 2; year <= currentYear; year++)
+            {
+                var quarters = new List<JamesReportQuarterRow>();
+                for (var q = 1; q <= 4; q++)
+                {
+                    var qPeriod = QuarterPeriod.Of(year, q);
+                    // Only include quarters that have started (current year may be partial).
+                    if (qPeriod.From >= dateToExclusive)
+                        break;
+
+                    counts.TryGetValue(code, out var byQ);
+                    byQ ??= new Dictionary<(int, int), (int, int, int)>();
+                    byQ.TryGetValue((year, q), out var cell);
+                    quarters.Add(new JamesReportQuarterRow(
+                        year,
+                        q,
+                        $"Qtr{q}",
+                        cell.Echo,
+                        cell.SeDse,
+                        cell.Consults));
+                }
+
+                if (quarters.Count == 0)
+                    continue;
+
+                years.Add(new JamesReportYearBlock(
+                    year,
+                    Partial: year == currentYear,
+                    quarters,
+                    quarters.Sum(r => r.Echo),
+                    quarters.Sum(r => r.SeDse),
+                    quarters.Sum(r => r.Consults)));
+            }
+
+            siteSections.Add(new JamesReportSiteSection(code, displayName, years));
+        }
+
+        return new JamesReport(dateFrom, dateToExclusive, currentYear, siteSections);
+    }
+
     public async Task<DrSummaryReport> GetDrSummaryHistoryAsync(
         string? cardiologistId, int year, int month, CancellationToken ct = default)
     {
@@ -2422,7 +2596,8 @@ public class Cm2Repository : ICm2Repository
                 TRIM(NVL(S.OCC_SERVICE_TITLE, '')) AS ServiceTitle,
                 TRIM(NVL(ST.SITE_NAME, '')) AS SiteName,
                 TRIM(TO_CHAR(P.PAT_CARDIOLOGIST)) AS CardiologistId,
-                TRIM(NVL(A.APPOINTMENT_NOTE, '')) AS AppointmentNote
+                TRIM(NVL(A.APPOINTMENT_NOTE, '')) AS AppointmentNote,
+                TRIM(TO_CHAR(P.PATIENT_RID)) AS PatientRid
             FROM {Schema}.SCHEDULE_APPOINTMENT A
             JOIN {Schema}.PATIENT P
               ON P.PATIENT_RID = A.PATIENT_RID
@@ -2497,6 +2672,9 @@ public class Cm2Repository : ICm2Repository
             var note = reader.IsDBNull(9) ? null : reader.GetString(9).Trim();
             if (string.IsNullOrWhiteSpace(note))
                 note = null;
+            var patientRid = reader.IsDBNull(10) ? null : reader.GetString(10).Trim();
+            if (string.IsNullOrWhiteSpace(patientRid))
+                patientRid = null;
 
             rows.Add(new ResearchUpcomingConsult(
                 appointmentId,
@@ -2509,7 +2687,8 @@ public class Cm2Repository : ICm2Repository
                 string.IsNullOrWhiteSpace(cardioId) ? null : cardioId,
                 cardioName,
                 note,
-                ResearchWorklistStatus.NotAssessed));
+                ResearchWorklistStatus.NotAssessed,
+                patientRid));
         }
 
         return new ResearchUpcomingConsultsResult(
@@ -2539,7 +2718,9 @@ public class Cm2Repository : ICm2Repository
                 TRIM(NVL(S.OCC_SERVICE_TITLE, '')) AS ServiceTitle,
                 TRIM(NVL(ST.SITE_NAME, '')) AS SiteName,
                 TRIM(TO_CHAR(P.PAT_CARDIOLOGIST)) AS CardiologistId,
-                TRIM(NVL(A.APPOINTMENT_NOTE, '')) AS AppointmentNote
+                TRIM(NVL(A.APPOINTMENT_NOTE, '')) AS AppointmentNote,
+                TRIM(TO_CHAR(P.PATIENT_RID)) AS PatientRid,
+                P.PAT_DOB
             FROM {Schema}.SCHEDULE_APPOINTMENT A
             JOIN {Schema}.PATIENT P
               ON P.PATIENT_RID = A.PATIENT_RID
@@ -2585,6 +2766,11 @@ public class Cm2Repository : ICm2Repository
         var note = reader.IsDBNull(9) ? null : reader.GetString(9).Trim();
         if (string.IsNullOrWhiteSpace(note))
             note = null;
+        var patientRid = reader.IsDBNull(10) ? null : reader.GetString(10).Trim();
+        if (string.IsNullOrWhiteSpace(patientRid))
+            patientRid = null;
+        var dob = reader.FieldCount > 11 && !reader.IsDBNull(11) ? ReadDateOnly(reader.GetValue(11)) : null;
+        var ageYears = dob is DateOnly dateOfBirth ? AgeYearsOn(dateOfBirth, appointmentDate) : null;
 
         return new ResearchUpcomingConsult(
             id,
@@ -2597,8 +2783,134 @@ public class Cm2Repository : ICm2Repository
             string.IsNullOrWhiteSpace(cardioId) ? null : cardioId,
             string.IsNullOrWhiteSpace(cardioId) ? null : Cm2CardiologistMapping.ResolveDisplayName(cardioId),
             note,
-            ResearchWorklistStatus.NotAssessed);
+            ResearchWorklistStatus.NotAssessed,
+            patientRid,
+            AgeYears: ageYears);
     }
+
+    public async Task<ResearchCm2LetterRef?> GetLatestConsultLetterAsync(
+        string patientRid, DateOnly? beforeDate = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(patientRid)
+            || !decimal.TryParse(patientRid.Trim(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var rid))
+            return null;
+
+        // CONSULT ⋈ LETTERS; consultation letters = LETTER_TYPE 6 (initial) / 7 (follow-up).
+        // Date authority is LETTERS.LETTER_DATE. Prefer letter before upcoming appointment.
+        var dateFilter = beforeDate is null
+            ? ""
+            : "AND L.LETTER_DATE < :BeforeDate";
+
+        var sql = $"""
+            SELECT
+                TRIM(TO_CHAR(C.PATIENT_RID)) AS PatientRid,
+                TRIM(TO_CHAR(C.CONSULT_RID)) AS ConsultRid,
+                TRIM(TO_CHAR(L.LETTERS_RID)) AS LettersRid,
+                L.LETTER_DATE,
+                L.LETTER_TYPE,
+                C.CONSULT_TYPE,
+                TRIM(NVL(L.LETTER_TITLE, '')) AS LetterTitle,
+                TRIM(NVL(L.LETTER_PATH, '')) AS LetterPath
+            FROM {Schema}.CONSULT C
+            JOIN {Schema}.LETTERS L
+              ON L.LETTERS_RID = C.LETTERS_RID
+            WHERE C.PATIENT_RID = :PatientRid
+              AND L.LETTER_TYPE IN (6, 7)
+              AND NULLIF(TRIM(L.LETTER_PATH), '') IS NOT NULL
+              {dateFilter}
+            ORDER BY L.LETTER_DATE DESC NULLS LAST, L.LETTERS_RID DESC
+            FETCH FIRST 1 ROW ONLY
+            """;
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("PatientRid", OracleDbType.Decimal).Value = rid;
+        if (beforeDate is not null)
+            cmd.Parameters.Add("BeforeDate", OracleDbType.Date).Value =
+                beforeDate.Value.ToDateTime(TimeOnly.MinValue);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        var path = reader.IsDBNull(7) ? "" : reader.GetString(7).Trim();
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        return new ResearchCm2LetterRef(
+            reader.IsDBNull(0) ? patientRid.Trim() : reader.GetString(0).Trim(),
+            reader.IsDBNull(1) ? "" : reader.GetString(1).Trim(),
+            reader.IsDBNull(2) ? "" : reader.GetString(2).Trim(),
+            ReadDateOnly(reader.IsDBNull(3) ? null : reader.GetValue(3)),
+            reader.IsDBNull(4) ? null : Convert.ToInt32(reader.GetValue(4)),
+            reader.IsDBNull(5) ? null : Convert.ToInt32(reader.GetValue(5)),
+            reader.IsDBNull(6) ? null : NullIfBlank(reader.GetString(6)),
+            path);
+    }
+
+    public async Task<ResearchCm2StudyReportRef?> GetLatestInvestigationReportAsync(
+        string patientRid, IReadOnlyList<int> testRequiredCodes, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(patientRid)
+            || !decimal.TryParse(patientRid.Trim(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var rid)
+            || testRequiredCodes.Count == 0)
+            return null;
+
+        var codes = testRequiredCodes.Distinct().ToList();
+        var inList = string.Join(", ", codes.Select((_, i) => $":Tr{i}"));
+
+        var sql = $"""
+            SELECT
+                TRIM(TO_CHAR(T.PATIENT_RID)) AS PatientRid,
+                TRIM(TO_CHAR(T.TEST_RID)) AS TestRid,
+                T.TEST_DATE,
+                T.TEST_REQUIRED,
+                TRIM(NVL(T.REPORT_PATH, '')) AS ReportPath
+            FROM {Schema}.TEST T
+            WHERE T.PATIENT_RID = :PatientRid
+              AND T.TEST_REQUIRED IN ({inList})
+              AND NULLIF(TRIM(T.REPORT_PATH), '') IS NOT NULL
+            ORDER BY T.TEST_DATE DESC NULLS LAST, T.TEST_RID DESC
+            FETCH FIRST 1 ROW ONLY
+            """;
+
+        await using var conn = new OracleConnection(_settings.Cm2OracleConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        cmd.Parameters.Add("PatientRid", OracleDbType.Decimal).Value = rid;
+        for (var i = 0; i < codes.Count; i++)
+            cmd.Parameters.Add($"Tr{i}", OracleDbType.Decimal).Value = codes[i];
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        var path = reader.IsDBNull(4) ? "" : reader.GetString(4).Trim();
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        var testRequired = reader.IsDBNull(3) ? 0 : Convert.ToInt32(reader.GetValue(3));
+        return new ResearchCm2StudyReportRef(
+            reader.IsDBNull(0) ? patientRid.Trim() : reader.GetString(0).Trim(),
+            reader.IsDBNull(1) ? "" : reader.GetString(1).Trim(),
+            ReadDateOnly(reader.IsDBNull(2) ? null : reader.GetValue(2)),
+            testRequired,
+            Cm2InvestigationTypeMapping.ResolveDisplayName(testRequired.ToString()),
+            path);
+    }
+
+    public bool TryResolveCm2FilePath(string relativePath, out string fullPath, out string error) =>
+        TryBuildReportFullPath(relativePath, out fullPath, out error);
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string StripLeadingSalutation(string firstName)
     {
@@ -2616,13 +2928,25 @@ public class Cm2Repository : ICm2Repository
 
     private static string FormatPatientName(string lastName, string firstName)
     {
-        if (!string.IsNullOrWhiteSpace(lastName) && !string.IsNullOrWhiteSpace(firstName))
+        lastName = (lastName ?? "").Trim();
+        firstName = (firstName ?? "").Trim();
+        if (lastName.Length > 0)
+            lastName = lastName.ToUpperInvariant();
+        if (lastName.Length > 0 && firstName.Length > 0)
             return $"{lastName}, {firstName}";
-        if (!string.IsNullOrWhiteSpace(lastName))
+        if (lastName.Length > 0)
             return lastName;
-        if (!string.IsNullOrWhiteSpace(firstName))
+        if (firstName.Length > 0)
             return firstName;
         return "—";
+    }
+
+    private static int? AgeYearsOn(DateOnly dateOfBirth, DateOnly onDate)
+    {
+        var age = onDate.Year - dateOfBirth.Year;
+        if (onDate < dateOfBirth.AddYears(age))
+            age--;
+        return age is >= 0 and <= 120 ? age : null;
     }
 
     private static DateOnly? ReadDateOnly(object? value)

@@ -6,9 +6,21 @@ export interface VersionEntry {
 }
 
 /** Current product version shown in Settings and System Health. */
-export const APP_VERSION = '1.4.0'
+export const APP_VERSION = '1.5.0'
 
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: '1.5.0',
+    date: '3 Sep 2026',
+    title: 'Research Patient Finder screening and James Report',
+    changes: [
+      'Research worklist: batch Screen all, early exit on inclusion NOT MET, and suitability toggle (Likely suitable / Not suitable).',
+      'Smarter screening from CM2 letters and echo reports: BMI and GLP-1/GIP facts, age-range correction, and fallback to stress echo then TTE when no consult letter exists.',
+      'Likely suitable when Age, BMI, diabetes, and HbA1c are favourable even if other criteria stay UNCLEAR; criterion status colours and capitalised surnames on the list.',
+      'Copy Results exports a Slack-ready summary of Suitable / Likely Suitable candidates grouped by consulting doctor.',
+      'James Report (CM2): multi-year site volumes for Echo, SE/DSE, and Consults with charts and PDF export.',
+    ],
+  },
   {
     version: '1.4.0',
     date: '20 Aug 2026',

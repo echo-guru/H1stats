@@ -42,6 +42,7 @@ public static class ClinicalReportCatalog
         "/clinical/physician-statistics",
         "/clinical/reporting-dr-cm2",
         "/clinical/dr-summary-cm2",
+        "/clinical/james-report",
         "/clinical/top-referring-doctors-cm2",
         "/clinical/top-referring-practices-cm2",
         "/clinical/referrers-growth-cm2",
@@ -255,6 +256,39 @@ public record DrSummaryReport(
     IReadOnlyList<DrSummaryColumn> Columns,
     IReadOnlyList<DrSummaryRow> Rows,
     int UnassignedDccs = 0);
+
+/// <summary>One calendar quarter of site volume for the James Report.</summary>
+public record JamesReportQuarterRow(
+    int Year,
+    int Quarter,
+    string Label,
+    int Echo,
+    int SeDse,
+    int Consults);
+
+/// <summary>Year block with quarter rows and year totals (current year may be partial).</summary>
+public record JamesReportYearBlock(
+    int Year,
+    bool Partial,
+    IReadOnlyList<JamesReportQuarterRow> Quarters,
+    int EchoTotal,
+    int SeDseTotal,
+    int ConsultsTotal);
+
+public record JamesReportSiteSection(
+    string SiteId,
+    string SiteName,
+    IReadOnlyList<JamesReportYearBlock> Years);
+
+/// <summary>
+/// Site volume report: Echo (TTE), SE/DSE, and diary consults by campus,
+/// current calendar year (partial) plus the prior two full years, by quarter.
+/// </summary>
+public record JamesReport(
+    DateOnly DateFrom,
+    DateOnly DateToExclusive,
+    int CurrentYear,
+    IReadOnlyList<JamesReportSiteSection> Sites);
 
 public record ReferrerHistoryReport(
     string Mode,

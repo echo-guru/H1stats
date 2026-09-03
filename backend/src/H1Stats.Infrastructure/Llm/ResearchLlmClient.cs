@@ -121,15 +121,30 @@ public sealed class ResearchLlmClient : IResearchLlmClient
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return new ResearchLlmChatResult(false, null, "LLM did not respond in time.", modelId);
+            return new ResearchLlmChatResult(
+                false,
+                null,
+                "LLM did not respond in time (timed out after the configured wait). This is the llama.cpp completion, not a CM2 file fetch.",
+                modelId);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            return new ResearchLlmChatResult(false, null, "Cannot reach the local LLM.", modelId);
+            var detail = string.IsNullOrWhiteSpace(ex.InnerException?.Message)
+                ? ex.Message
+                : $"{ex.Message} ({ex.InnerException.Message})";
+            return new ResearchLlmChatResult(false, null, $"Cannot reach the local LLM: {detail}", modelId);
         }
-        catch (Exception)
+        catch (IOException ex)
         {
-            return new ResearchLlmChatResult(false, null, "LLM completion failed.", modelId);
+            return new ResearchLlmChatResult(
+                false,
+                null,
+                $"LLM connection dropped while reading the completion: {ex.Message}",
+                modelId);
+        }
+        catch (Exception ex)
+        {
+            return new ResearchLlmChatResult(false, null, $"LLM completion failed: {ex.Message}", modelId);
         }
     }
 

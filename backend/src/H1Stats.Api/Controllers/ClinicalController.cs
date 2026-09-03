@@ -390,6 +390,20 @@ public class ClinicalController : ControllerBase
         }
     }
 
+    [HttpGet("cm2/james-report")]
+    public async Task<IActionResult> GetJamesReport(CancellationToken ct)
+    {
+        try
+        {
+            var report = await _cm2.GetJamesReportAsync(ct);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpGet("cm2/dr-summary/history")]
     public async Task<IActionResult> GetDrSummaryHistory(
         [FromQuery] string? physician,

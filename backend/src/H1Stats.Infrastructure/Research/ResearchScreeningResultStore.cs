@@ -34,8 +34,17 @@ public sealed class ResearchScreeningResultStore : IResearchScreeningResultStore
 
         lock (_lock)
         {
-            return Task.FromResult(
-                _byAppointmentId.TryGetValue(key, out var result) ? result : null);
+            if (!_byAppointmentId.TryGetValue(key, out var result))
+                return Task.FromResult<ResearchAppointmentScreeningResult?>(null);
+
+            var promoted = ResearchOverall.PromoteSaved(result);
+            if (!ReferenceEquals(promoted, result))
+            {
+                _byAppointmentId[key] = promoted;
+                PersistUnlocked();
+            }
+
+            return Task.FromResult<ResearchAppointmentScreeningResult?>(promoted);
         }
     }
 
@@ -51,11 +60,27 @@ public sealed class ResearchScreeningResultStore : IResearchScreeningResultStore
         lock (_lock)
         {
             var map = new Dictionary<string, ResearchAppointmentScreeningResult>(StringComparer.OrdinalIgnoreCase);
+            var dirty = false;
             foreach (var key in keys)
             {
-                if (_byAppointmentId.TryGetValue(key, out var result))
+                if (!_byAppointmentId.TryGetValue(key, out var result))
+                    continue;
+                var promoted = ResearchOverall.PromoteSaved(result);
+                if (!ReferenceEquals(promoted, result))
+                {
+                    _byAppointmentId[key] = promoted;
+                    dirty = true;
+                    map[key] = promoted;
+                }
+                else
+                {
                     map[key] = result;
+                }
             }
+
+            if (dirty)
+                PersistUnlocked();
+
             return Task.FromResult<IReadOnlyDictionary<string, ResearchAppointmentScreeningResult>>(map);
         }
     }
@@ -70,6 +95,7 @@ public sealed class ResearchScreeningResultStore : IResearchScreeningResultStore
             AppointmentId = key,
             Status = ResearchWorklistStatusMapper.FromStudies(result.Studies),
             Studies = result.Studies.ToList(),
+            DocumentsReviewed = result.DocumentsReviewed?.ToList(),
         };
 
         lock (_lock)
