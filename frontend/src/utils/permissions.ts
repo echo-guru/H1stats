@@ -29,7 +29,7 @@ export const MODULE_LABELS: Record<AppModule, string> = {
   operations: 'Operations',
   quality: 'Quality',
   research: 'Research',
-  workllists: 'Workllists',
+  workllists: 'Worklists',
   sandbox: 'SandBox',
   finance: 'Finance',
 }

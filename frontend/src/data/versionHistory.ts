@@ -12,7 +12,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: '1.7.0',
     date: '3 Sep 2026',
-    title: 'Workllists diary actions and SandBox CM2DEV',
+    title: 'Worklists diary actions and SandBox CM2DEV',
     changes: [
       'Pink recall worklist: staged Done/Cancel editing for notes, test type (Cardiology ↔ Admin Recall), arrive, and date/time moves.',
       'Move recalls only into free room slots for that day (15-minute duration-aware clash check against other bookings).',
@@ -24,9 +24,9 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: '1.6.0',
     date: '3 Sep 2026',
-    title: 'Workllists and Super Admin user management',
+    title: 'Worklists and Super Admin user management',
     changes: [
-      'New Super Admin–only Workllists tab with Unarrived pink recalls from the Oracle CM2 schedule.',
+      'New Super Admin–only Worklists tab with Unarrived pink recalls from the Oracle CM2 schedule.',
       'Pink recall filters: optional date range (blank = all unarrived), site, and H1 cardiologist.',
       'Click a recall row to edit schedule notes (saved back to CM2); click again to collapse to read-only.',
       'Super Admins can grant or revoke Super Admin in User Management, with last–Super Admin protection.',

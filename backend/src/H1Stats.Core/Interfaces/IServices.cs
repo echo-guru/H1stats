@@ -157,6 +157,10 @@ public interface ICm2DevDatabase
         string appointmentId, string date, string? time, CancellationToken ct = default);
     Task<AvailableDiarySlotsResult> GetAvailableDiarySlotsAsync(
         string appointmentId, string date, CancellationToken ct = default);
+    Task<UnassignedConsultPatientResult> GetUnassignedConsultPatientsAsync(
+        int lookbackMonths = 12, CancellationToken ct = default);
+    Task<(bool Ok, string? Error, string? CardiologistId, string? CardiologistName)> AssignPatientCardiologistAsync(
+        string patientRid, string cardiologistId, CancellationToken ct = default);
 }
 
 /// <summary>Server-side client for the local research LLM. The browser never sees the API key.</summary>

@@ -76,4 +76,14 @@ public sealed class Cm2DevDatabase : ICm2DevDatabase
         string appointmentId, string date, CancellationToken ct = default) =>
         PinkRecallWorklistStore.GetAvailableDiarySlotsAsync(
             ConnectionString, Schema, appointmentId, date, ct);
+
+    public Task<UnassignedConsultPatientResult> GetUnassignedConsultPatientsAsync(
+        int lookbackMonths = 12, CancellationToken ct = default) =>
+        UnassignedConsultStore.GetUnassignedConsultPatientsAsync(
+            ConnectionString, Schema, lookbackMonths, ct);
+
+    public Task<(bool Ok, string? Error, string? CardiologistId, string? CardiologistName)> AssignPatientCardiologistAsync(
+        string patientRid, string cardiologistId, CancellationToken ct = default) =>
+        UnassignedConsultStore.AssignPatientCardiologistAsync(
+            ConnectionString, Schema, patientRid, cardiologistId, ct);
 }

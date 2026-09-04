@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { CheckCircle2, ClipboardList, Download, RefreshCw, X } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
@@ -89,15 +89,21 @@ export interface WorkllistsHomeProps {
   title?: string
   subtitle?: string
   noteSavedMessage?: string
+  /**
+   * When true, allow arrive / notes / test type / schedule edits (SandBox / CM2DEV only).
+   * Production Worklists stays read-only.
+   */
+  allowMutations?: boolean
 }
 
 export default function WorkllistsHome({
   apiBase = '/api/workllists',
   sitesApi = '/api/clinical/cm2/sites',
   showPageHeader = true,
-  title = 'Workllists',
-  subtitle = 'Operational worklists from the Oracle CM2 schedule',
+  title = 'Worklists',
+  subtitle = 'Operational worklists from the Oracle CM2 schedule (read-only — expand a row for the full note; use SandBox to test edits)',
   noteSavedMessage = 'Note saved to CM2 schedule',
+  allowMutations = false,
 }: WorkllistsHomeProps = {}) {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -205,13 +211,13 @@ export default function WorkllistsHome({
   }
 
   useEffect(() => {
-    if (!editingAppointmentId) return
+    if (!allowMutations || !editingAppointmentId) return
     noteEditorRef.current?.focus()
-  }, [editingAppointmentId])
+  }, [allowMutations, editingAppointmentId])
 
-  // Load free room slots for the draft date while a row is expanded.
+  // Load free room slots for the draft date while a row is expanded (mutations only).
   useEffect(() => {
-    if (!editingAppointmentId) {
+    if (!allowMutations || !editingAppointmentId) {
       setAvailableSlots([])
       setSlotsMessage('')
       setSlotsLoading(false)
@@ -272,9 +278,10 @@ export default function WorkllistsHome({
     return () => {
       cancelled = true
     }
-  }, [apiBase, editingAppointmentId, scheduleDrafts[editingAppointmentId ?? '']?.date])
+  }, [allowMutations, apiBase, editingAppointmentId, scheduleDrafts[editingAppointmentId ?? '']?.date])
 
   const isRowDirty = (appointmentId: string) => {
+    if (!allowMutations) return false
     const row = result?.rows.find((r) => r.appointmentId === appointmentId)
     if (!row) return false
     const note = noteDrafts[appointmentId] ?? ''
@@ -329,6 +336,7 @@ export default function WorkllistsHome({
 
   /** Apply staged edits. Row stays until Done finishes; then removes only if it no longer belongs. */
   const doneEditing = async (appointmentId: string) => {
+    if (!allowMutations) return
     const row = result?.rows.find((r) => r.appointmentId === appointmentId)
     if (!row) return
 
@@ -511,10 +519,11 @@ export default function WorkllistsHome({
 
   const selectRow = (appointmentId: string) => {
     if (editingAppointmentId === appointmentId) {
-      // Stay expanded until Done / Cancel — avoid accidental collapse
+      // Toggle collapse — drafts kept so re-expand restores unsaved edits
+      setEditingAppointmentId(null)
       return
     }
-    if (editingAppointmentId && isRowDirty(editingAppointmentId)) {
+    if (allowMutations && editingAppointmentId && isRowDirty(editingAppointmentId)) {
       const leave = window.confirm(
         'You have unsaved changes on another row. Discard them and switch?'
       )
@@ -583,7 +592,9 @@ export default function WorkllistsHome({
           <h3 className="text-lg font-semibold text-brand-primary">Unarrived pink recalls</h3>
           <p className="text-sm text-gray-600">
             Cardiology Recall diary bookings not yet arrived. Leave dates blank for all unarrived.
-            Click a row to edit notes or change test type to Admin Recall (yellow) to hand off to admin.
+            {allowMutations
+              ? ' Click a row to expand the editor (click again to collapse). Arrive, notes, test type, and schedule changes apply only when you click Done (CM2 DEV).'
+              : ' Click a row to expand and read the full recall note (click again to collapse). Production is read-only — use SandBox to test edits against CM2 DEV.'}
           </p>
         </div>
 
@@ -689,19 +700,19 @@ export default function WorkllistsHome({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
+              <table className="w-full table-fixed text-sm">
                 <thead className="bg-brand-primary-light text-brand-primary">
                   <tr>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Lastname</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Firstname</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">PAT ID</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">DOB</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Cardiologist</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Test type</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Room</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Date</th>
-                    <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Time</th>
-                    <th className="text-left font-semibold px-3 py-2 min-w-[18rem]">Notes</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[9%]">Lastname</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[9%]">Firstname</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[7%]">PAT ID</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[7%]">DOB</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[11%]">Cardiologist</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[11%]">Test type</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[10%]">Room</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[7%]">Date</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[5%]">Time</th>
+                    <th className="text-left font-semibold px-3 py-2 w-[24%]">Notes</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -714,63 +725,37 @@ export default function WorkllistsHome({
                   ) : (
                     result.rows.map((row) => {
                       const draft = noteDrafts[row.appointmentId] ?? ''
-                      const dirty = isRowDirty(row.appointmentId)
+                      const dirty = allowMutations && isRowDirty(row.appointmentId)
                       const saving = savingNoteId === row.appointmentId
-                      const editing = editingAppointmentId === row.appointmentId
+                      const expanded = editingAppointmentId === row.appointmentId
                       const serviceDraft =
                         serviceTypeDrafts[row.appointmentId] ??
                         String(row.serviceTypeId || PINK_SERVICE_TYPE_ID)
                       const arrivePending = Boolean(pendingArrive[row.appointmentId])
                       return (
-                        <tr
-                          key={row.appointmentId}
-                          onClick={() => selectRow(row.appointmentId)}
-                          className={`border-t border-gray-100 align-top cursor-pointer ${
-                            editing
-                              ? 'bg-brand-primary-light/60 ring-1 ring-inset ring-brand-primary-border'
-                              : 'hover:bg-gray-50'
-                          }`}
-                        >
-                          <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">
-                            {row.lastName || '—'}
-                          </td>
-                          <td className="px-3 py-2 text-gray-800 whitespace-nowrap">
-                            {row.firstName || '—'}
-                          </td>
-                          <td className="px-3 py-2 text-gray-800 whitespace-nowrap">
-                            {row.patientCmId || '—'}
-                          </td>
-                          <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                            {formatDisplayDate(row.dateOfBirth)}
-                          </td>
-                          <td className="px-3 py-2 text-gray-800 whitespace-nowrap">
-                            {row.cardiologistName || '—'}
-                          </td>
-                          <td
-                            className="px-3 py-2 text-gray-800 whitespace-nowrap"
-                            onClick={(e) => {
-                              if (editing) e.stopPropagation()
-                            }}
+                        <Fragment key={row.appointmentId}>
+                          <tr
+                            onClick={() => selectRow(row.appointmentId)}
+                            className={`border-t border-gray-100 align-top cursor-pointer ${
+                              expanded ? 'bg-brand-primary-light/60' : 'hover:bg-gray-50'
+                            }`}
                           >
-                            {editing ? (
-                              <select
-                                value={serviceDraft}
-                                disabled={saving}
-                                onChange={(e) =>
-                                  setServiceTypeDrafts((prev) => ({
-                                    ...prev,
-                                    [row.appointmentId]: e.target.value,
-                                  }))
-                                }
-                                className="border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary max-w-[14rem]"
-                              >
-                                {SERVICE_TYPE_OPTIONS.map((opt) => (
-                                  <option key={opt.id} value={opt.id}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
+                            <td className="px-3 py-2 font-medium text-gray-900 truncate">
+                              {row.lastName || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-800 truncate">
+                              {row.firstName || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-800 truncate">
+                              {row.patientCmId || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-700 truncate">
+                              {formatDisplayDate(row.dateOfBirth)}
+                            </td>
+                            <td className="px-3 py-2 text-gray-800 truncate">
+                              {row.cardiologistName || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-800 truncate">
                               <span
                                 className={
                                   String(row.serviceTypeId) === '28'
@@ -780,191 +765,265 @@ export default function WorkllistsHome({
                               >
                                 {row.serviceTitle || '—'}
                               </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-gray-800 whitespace-nowrap">
-                            {row.roomName || '—'}
-                            {row.siteName ? (
-                              <span className="block text-xs text-gray-500">{row.siteName}</span>
-                            ) : null}
-                          </td>
-                          <td
-                            className="px-3 py-2 text-gray-800 whitespace-nowrap"
-                            onClick={(e) => {
-                              if (editing) e.stopPropagation()
-                            }}
-                          >
-                            {editing ? (
-                              <input
-                                type="date"
-                                value={
-                                  scheduleDrafts[row.appointmentId]?.date ??
-                                  toDateInputValue(row.appointmentDate)
-                                }
-                                disabled={saving}
-                                onChange={(e) =>
-                                  setScheduleDrafts((prev) => ({
-                                    ...prev,
-                                    [row.appointmentId]: {
-                                      date: e.target.value,
-                                      time:
-                                        prev[row.appointmentId]?.time ??
-                                        toTimeInputValue(row.appointmentTime),
-                                    },
-                                  }))
-                                }
-                                className="border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                              />
-                            ) : (
-                              formatDisplayDate(row.appointmentDate)
-                            )}
-                          </td>
-                          <td
-                            className="px-3 py-2 text-gray-800 whitespace-nowrap"
-                            onClick={(e) => {
-                              if (editing) e.stopPropagation()
-                            }}
-                          >
-                            {editing ? (
-                              <div className="space-y-1 min-w-[7.5rem]">
-                                <select
-                                  value={
-                                    scheduleDrafts[row.appointmentId]?.time ??
-                                    toTimeInputValue(row.appointmentTime)
-                                  }
-                                  disabled={saving || slotsLoading || availableSlots.length === 0}
-                                  onChange={(e) =>
-                                    setScheduleDrafts((prev) => ({
-                                      ...prev,
-                                      [row.appointmentId]: {
-                                        date:
-                                          prev[row.appointmentId]?.date ??
-                                          toDateInputValue(row.appointmentDate),
-                                        time: e.target.value,
-                                      },
-                                    }))
-                                  }
-                                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                                >
-                                  <option value="">
-                                    {slotsLoading
-                                      ? 'Loading slots…'
-                                      : availableSlots.length === 0
-                                        ? 'No free slots'
-                                        : 'Select time'}
-                                  </option>
-                                  {availableSlots.map((slot) => (
-                                    <option key={slot} value={slot}>
-                                      {slot}
-                                    </option>
-                                  ))}
-                                </select>
-                                {slotsMessage ? (
-                                  <span className="block text-[11px] text-amber-800 max-w-[10rem] whitespace-normal">
-                                    {slotsMessage}
-                                  </span>
-                                ) : (
-                                  <span className="block text-[11px] text-gray-400">
-                                    Free in this room
+                            </td>
+                            <td className="px-3 py-2 text-gray-800">
+                              <span className="block truncate">{row.roomName || '—'}</span>
+                              {row.siteName ? (
+                                <span className="block text-xs text-gray-500 truncate">
+                                  {row.siteName}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-3 py-2 text-gray-800 truncate">
+                              {formatDisplayDate(row.appointmentDate)}
+                            </td>
+                            <td className="px-3 py-2 text-gray-800 truncate">
+                              {row.appointmentTime || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-700">
+                              <div className="truncate text-sm text-gray-700">
+                                {draft || (
+                                  <span className="text-gray-400 italic">
+                                    {allowMutations ? 'Click row to edit' : 'Click row for full note'}
                                   </span>
                                 )}
                               </div>
-                            ) : (
-                              row.appointmentTime || '—'
-                            )}
-                          </td>
-                          <td
-                            className="px-3 py-2 text-gray-700 min-w-[18rem] max-w-lg"
-                            onClick={(e) => {
-                              if (editing) e.stopPropagation()
-                            }}
-                          >
-                            {editing ? (
-                              <>
-                                <textarea
-                                  ref={noteEditorRef}
-                                  value={draft}
-                                  maxLength={NOTE_MAX_LENGTH}
-                                  rows={3}
-                                  disabled={saving}
-                                  onChange={(e) =>
-                                    setNoteDrafts((prev) => ({
-                                      ...prev,
-                                      [row.appointmentId]: e.target.value,
-                                    }))
-                                  }
-                                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary resize-y min-h-[4.5rem] bg-white"
-                                  placeholder="Add schedule note…"
-                                />
-                                <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
-                                  <span className="text-xs text-gray-400">
-                                    {draft.length}/{NOTE_MAX_LENGTH}
-                                    {dirty ? ' · unsaved' : ''}
-                                  </span>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className={`gap-1 h-7 ${
-                                        arrivePending
-                                          ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
-                                          : ''
-                                      }`}
+                            </td>
+                          </tr>
+                          {expanded ? (
+                            <tr className="bg-brand-primary-light/40 border-b border-brand-primary-border">
+                              <td
+                                colSpan={10}
+                                className="px-4 py-3"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {allowMutations ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 max-w-full">
+                                  <div>
+                                    <label className="block text-xs font-medium text-brand-primary mb-1">
+                                      Test type
+                                    </label>
+                                    <select
+                                      value={serviceDraft}
                                       disabled={saving}
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        setPendingArrive((prev) => ({
+                                      onChange={(e) =>
+                                        setServiceTypeDrafts((prev) => ({
                                           ...prev,
-                                          [row.appointmentId]: !prev[row.appointmentId],
+                                          [row.appointmentId]: e.target.value,
                                         }))
-                                      }}
+                                      }
+                                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
                                     >
-                                      <CheckCircle2 className="h-3.5 w-3.5" />
-                                      {arrivePending ? 'Arrive selected' : 'Arrive'}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="gap-1 h-7"
+                                      {SERVICE_TYPE_OPTIONS.map((opt) => (
+                                        <option key={opt.id} value={opt.id}>
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-brand-primary mb-1">
+                                      Date
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={
+                                        scheduleDrafts[row.appointmentId]?.date ??
+                                        toDateInputValue(row.appointmentDate)
+                                      }
                                       disabled={saving}
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        cancelEditing(row.appointmentId)
-                                      }}
+                                      onChange={(e) =>
+                                        setScheduleDrafts((prev) => ({
+                                          ...prev,
+                                          [row.appointmentId]: {
+                                            date: e.target.value,
+                                            time:
+                                              prev[row.appointmentId]?.time ??
+                                              toTimeInputValue(row.appointmentTime),
+                                          },
+                                        }))
+                                      }
+                                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-brand-primary mb-1">
+                                      Time (free slots)
+                                    </label>
+                                    <select
+                                      value={
+                                        scheduleDrafts[row.appointmentId]?.time ??
+                                        toTimeInputValue(row.appointmentTime)
+                                      }
+                                      disabled={saving || slotsLoading || availableSlots.length === 0}
+                                      onChange={(e) =>
+                                        setScheduleDrafts((prev) => ({
+                                          ...prev,
+                                          [row.appointmentId]: {
+                                            date:
+                                              prev[row.appointmentId]?.date ??
+                                              toDateInputValue(row.appointmentDate),
+                                            time: e.target.value,
+                                          },
+                                        }))
+                                      }
+                                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
                                     >
-                                      <X className="h-3.5 w-3.5" />
-                                      Cancel
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      className="gap-1 h-7"
-                                      disabled={saving || !dirty}
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        void doneEditing(row.appointmentId)
-                                      }}
-                                    >
-                                      {saving ? 'Saving…' : 'Done'}
-                                    </Button>
+                                      <option value="">
+                                        {slotsLoading
+                                          ? 'Loading slots…'
+                                          : availableSlots.length === 0
+                                            ? 'No free slots'
+                                            : 'Select time'}
+                                      </option>
+                                      {availableSlots.map((slot) => (
+                                        <option key={slot} value={slot}>
+                                          {slot}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {slotsMessage ? (
+                                      <p className="mt-1 text-[11px] text-amber-800">{slotsMessage}</p>
+                                    ) : (
+                                      <p className="mt-1 text-[11px] text-gray-400">
+                                        Free openings in this room
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="sm:col-span-2 lg:col-span-4">
+                                    <label className="block text-xs font-medium text-brand-primary mb-1">
+                                      Notes
+                                    </label>
+                                    <textarea
+                                      ref={noteEditorRef}
+                                      value={draft}
+                                      maxLength={NOTE_MAX_LENGTH}
+                                      rows={3}
+                                      disabled={saving}
+                                      onChange={(e) =>
+                                        setNoteDrafts((prev) => ({
+                                          ...prev,
+                                          [row.appointmentId]: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary resize-y min-h-[4.5rem] bg-white"
+                                      placeholder="Add schedule note…"
+                                    />
+                                    <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                                      <span className="text-xs text-gray-400">
+                                        {draft.length}/{NOTE_MAX_LENGTH}
+                                        {dirty ? ' · unsaved' : ''}
+                                        <span className="text-gray-400"> · click row to collapse</span>
+                                      </span>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className={`gap-1 h-7 ${
+                                            arrivePending
+                                              ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
+                                              : ''
+                                          }`}
+                                          disabled={saving}
+                                          onClick={() =>
+                                            setPendingArrive((prev) => ({
+                                              ...prev,
+                                              [row.appointmentId]: !prev[row.appointmentId],
+                                            }))
+                                          }
+                                        >
+                                          <CheckCircle2 className="h-3.5 w-3.5" />
+                                          {arrivePending ? 'Arrive selected' : 'Arrive'}
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="gap-1 h-7"
+                                          disabled={saving}
+                                          onClick={() => cancelEditing(row.appointmentId)}
+                                        >
+                                          <X className="h-3.5 w-3.5" />
+                                          Cancel
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          className="gap-1 h-7"
+                                          disabled={saving || !dirty}
+                                          onClick={() => void doneEditing(row.appointmentId)}
+                                        >
+                                          {saving ? 'Saving…' : 'Done'}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                      Changes apply only when you click Done. Click the row again to
+                                      collapse without saving.
+                                    </p>
                                   </div>
                                 </div>
-                                <p className="mt-1 text-xs text-gray-500">
-                                  Changes (including Arrive / Admin Recall) apply only when you click
-                                  Done.
-                                </p>
-                              </>
-                            ) : (
-                              <div className="whitespace-pre-wrap text-sm text-gray-700 min-h-[1.5rem]">
-                                {draft || (
-                                  <span className="text-gray-400 italic">Click row to edit</span>
+                                ) : (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 max-w-full">
+                                    <div>
+                                      <p className="text-xs font-medium text-brand-primary mb-1">
+                                        Test type
+                                      </p>
+                                      <p
+                                        className={`text-sm ${
+                                          String(row.serviceTypeId) === '28'
+                                            ? 'text-amber-800'
+                                            : 'text-fuchsia-800'
+                                        }`}
+                                      >
+                                        {row.serviceTitle || '—'}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-medium text-brand-primary mb-1">
+                                        Date
+                                      </p>
+                                      <p className="text-sm text-gray-800">
+                                        {formatDisplayDate(row.appointmentDate)}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-medium text-brand-primary mb-1">
+                                        Time
+                                      </p>
+                                      <p className="text-sm text-gray-800">
+                                        {row.appointmentTime || '—'}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-medium text-brand-primary mb-1">
+                                        Room
+                                      </p>
+                                      <p className="text-sm text-gray-800">
+                                        {row.roomName || '—'}
+                                        {row.siteName ? ` · ${row.siteName}` : ''}
+                                      </p>
+                                    </div>
+                                    <div className="sm:col-span-2 lg:col-span-4">
+                                      <p className="text-xs font-medium text-brand-primary mb-1">
+                                        Notes
+                                      </p>
+                                      <div className="whitespace-pre-wrap text-sm text-gray-800 bg-white border border-gray-200 rounded-md px-3 py-2 min-h-[4.5rem]">
+                                        {draft || (
+                                          <span className="text-gray-400 italic">No note</span>
+                                        )}
+                                      </div>
+                                      <p className="mt-1.5 text-xs text-gray-500">
+                                        Read-only · click the row again to collapse
+                                      </p>
+                                    </div>
+                                  </div>
                                 )}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
                       )
                     })
                   )}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle, FlaskConical, RefreshCw, XCircle } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import WorkllistsHome from './WorkllistsHome'
+import UnassignedCardiologistsList from './UnassignedCardiologistsList'
 
 interface SandBoxStatus {
   dataset: string
@@ -107,10 +108,15 @@ export default function SandBoxHome() {
           apiBase="/api/sandbox/workllists"
           sitesApi="/api/sandbox/workllists/sites"
           showPageHeader
-          title="Workllists (CM2 DEV)"
-          subtitle="Same pink-recall worklist as production, queried only against CM2DEV"
+          allowMutations
+          title="Worklists (CM2 DEV)"
+          subtitle="Same pink-recall worklist as production, queried only against CM2DEV — edits apply to DEV only"
           noteSavedMessage="Note saved to CM2 DEV schedule"
         />
+      </div>
+
+      <div className="border-t border-brand-primary-border pt-6">
+        <UnassignedCardiologistsList />
       </div>
     </div>
   )

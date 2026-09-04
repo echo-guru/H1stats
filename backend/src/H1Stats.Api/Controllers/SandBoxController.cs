@@ -190,4 +190,47 @@ public class SandBoxController : ControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>
+    /// Patients with Initial/Follow-up consults in the last N months and no H1 cardiologist (one row per patient).
+    /// </summary>
+    [HttpGet("unassigned-cardiologists")]
+    public async Task<IActionResult> GetUnassignedCardiologists(
+        [FromQuery] int lookbackMonths = 12,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await _cm2Dev.GetUnassignedConsultPatientsAsync(lookbackMonths, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    public sealed record AssignCardiologistRequest(string CardiologistId);
+
+    /// <summary>Assigns PATIENT.PAT_CARDIOLOGIST on CM2 DEV (removes patient from unassigned list).</summary>
+    [HttpPut("unassigned-cardiologists/{patientRid}/assign")]
+    public async Task<IActionResult> AssignCardiologist(
+        string patientRid,
+        [FromBody] AssignCardiologistRequest request,
+        CancellationToken ct)
+    {
+        var (ok, error, cardiologistId, cardiologistName) =
+            await _cm2Dev.AssignPatientCardiologistAsync(patientRid, request.CardiologistId, ct);
+        if (!ok)
+        {
+            if (string.Equals(error, "Patient not found", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(error, "Invalid patient id", StringComparison.OrdinalIgnoreCase))
+                return NotFound(new { message = error });
+            if (error is not null && error.Contains("lacks UPDATE", StringComparison.OrdinalIgnoreCase))
+                return StatusCode(403, new { message = error });
+            return BadRequest(new { message = error ?? "Failed to assign cardiologist" });
+        }
+
+        return Ok(new { patientRid, cardiologistId, cardiologistName });
+    }
 }

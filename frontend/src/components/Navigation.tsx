@@ -57,7 +57,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     path: '/workllists',
-    label: 'Workllists',
+    label: 'Worklists',
     icon: ClipboardList,
     module: 'workllists',
     superAdminOnly: true,
