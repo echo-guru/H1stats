@@ -1,6 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { CheckCircle2, ClipboardList, Download, RefreshCw, X } from 'lucide-react'
 import { Button } from '../components/ui/button'
+import UnactionedConsultReferralsList from './UnactionedConsultReferralsList'
+import MissingCtcaDocsList from './MissingCtcaDocsList'
+
+type WorklistTab = 'pink-recalls' | 'unactioned-consult-referrals' | 'missing-ctca-docs'
 
 interface SiteOption {
   id: string
@@ -101,10 +105,11 @@ export default function WorkllistsHome({
   sitesApi = '/api/clinical/cm2/sites',
   showPageHeader = true,
   title = 'Worklists',
-  subtitle = 'Operational worklists from the Oracle CM2 schedule (read-only — expand a row for the full note; use SandBox to test edits)',
+  subtitle = 'Operational worklists from Oracle CM2 (read-only — use SandBox to test edits)',
   noteSavedMessage = 'Note saved to CM2 schedule',
   allowMutations = false,
 }: WorkllistsHomeProps = {}) {
+  const [tab, setTab] = useState<WorklistTab>('pink-recalls')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [site, setSite] = useState('')
@@ -587,6 +592,47 @@ export default function WorkllistsHome({
         </div>
       )}
 
+      <div className="flex gap-1 border-b border-brand-primary-border">
+        <button
+          type="button"
+          onClick={() => setTab('pink-recalls')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === 'pink-recalls'
+              ? 'border-brand-primary text-brand-primary'
+              : 'border-transparent text-gray-500 hover:text-brand-primary'
+          }`}
+        >
+          Unarrived pink recalls
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('unactioned-consult-referrals')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === 'unactioned-consult-referrals'
+              ? 'border-brand-primary text-brand-primary'
+              : 'border-transparent text-gray-500 hover:text-brand-primary'
+          }`}
+        >
+          Unactioned consult referrals
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('missing-ctca-docs')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === 'missing-ctca-docs'
+              ? 'border-brand-primary text-brand-primary'
+              : 'border-transparent text-gray-500 hover:text-brand-primary'
+          }`}
+        >
+          Missing CTCA docs
+        </button>
+      </div>
+
+      {tab === 'unactioned-consult-referrals' ? (
+        <UnactionedConsultReferralsList apiBase={apiBase} />
+      ) : tab === 'missing-ctca-docs' ? (
+        <MissingCtcaDocsList apiBase={apiBase} />
+      ) : (
       <section className="space-y-4">
         <div>
           <h3 className="text-lg font-semibold text-brand-primary">Unarrived pink recalls</h3>
@@ -1033,6 +1079,7 @@ export default function WorkllistsHome({
           </div>
         )}
       </section>
+      )}
     </div>
   )
 }

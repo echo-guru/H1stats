@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Microscope, CheckCircle, XCircle, RefreshCw, FlaskConical, Plus, ArrowRight, CalendarRange, ChevronDown, ChevronRight, Play, Square, Copy } from 'lucide-react'
+import { Microscope, CheckCircle, XCircle, RefreshCw, FlaskConical, Plus, ArrowRight, CalendarRange, ChevronDown, ChevronRight, Play, Square, Copy, Send } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
 interface LlmStatus {
@@ -133,18 +133,53 @@ const CARDIOLOGIST_OPTIONS = [
   { id: '981', label: 'Dr Jeremy Wright' },
 ]
 
-function isoDate(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+const BRISBANE_TZ = 'Australia/Brisbane'
+
+/** Calendar date in Brisbane (YYYY-MM-DD). */
+function brisbaneTodayIso(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: BRISBANE_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+const SLACK_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function dayOrdinal(day: number): string {
+  const mod100 = day % 100
+  if (mod100 >= 11 && mod100 <= 13) return `${day}th`
+  switch (day % 10) {
+    case 1:
+      return `${day}st`
+    case 2:
+      return `${day}nd`
+    case 3:
+      return `${day}rd`
+    default:
+      return `${day}th`
+  }
+}
+
+/** e.g. Friday 11th Sep 2026 — Brisbane calendar date from YYYY-MM-DD. */
+function candidateReportDateLabel(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim())
+  if (!m) return iso
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const dt = new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+10:00`)
+  const weekday = new Intl.DateTimeFormat('en-AU', {
+    timeZone: BRISBANE_TZ,
+    weekday: 'long',
+  }).format(dt)
+  return `${weekday} ${dayOrdinal(day)} ${SLACK_MONTHS[month - 1]} ${year}`
 }
 
 function defaultConsultRange(): { from: string; to: string } {
-  const from = new Date()
-  const to = new Date()
-  to.setDate(to.getDate() + 13)
-  return { from: isoDate(from), to: isoDate(to) }
+  const day = brisbaneTodayIso()
+  return { from: day, to: day }
 }
 
 function worklistStatusClass(status: string): string {
@@ -224,8 +259,6 @@ function nextReviewOverall(current: string): string {
   return current === 'LIKELY_SUITABLE' ? 'LIKELY_NOT_SUITABLE' : 'LIKELY_SUITABLE'
 }
 
-const SLACK_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
 function formatListPatientName(stored: string): string {
   const trimmed = stored.trim()
   const comma = trimmed.indexOf(',')
@@ -269,28 +302,38 @@ function slackAppointmentTime(time?: string | null): string | null {
 }
 
 /** Presentation label from stored study.overall (and existing UNCLEAR rows). Does not re-score. */
-function slackStudyClassification(study: StudyScreening): 'Suitable' | 'Likely Suitable' | null {
+function slackStudyClassification(
+  study: StudyScreening,
+): 'Suitable' | 'Likely Suitable' | 'Unclear' | null {
   if (study.overall === 'LIKELY_SUITABLE') {
     const unclear = study.inclusion.concat(study.exclusion).some((row) => row.status === 'UNCLEAR')
     return unclear ? 'Likely Suitable' : 'Suitable'
   }
   if (study.overall === 'POSSIBLY_SUITABLE') return 'Likely Suitable'
+  if (study.overall === 'NEEDS_REVIEW') return 'Unclear'
   return null
 }
 
-function buildCandidateSlack(consults: UpcomingConsult[]): string {
+function buildCandidateSlack(consults: UpcomingConsult[], searchDateIso: string): string {
   const linesByDoctor = new Map<string, string[]>()
   const doctorOrder: string[] = []
 
   for (const row of consults) {
-    if (row.status !== 'SUITABLE') continue
+    if (row.status !== 'SUITABLE' && row.status !== 'UNCLEAR') continue
 
     const positive = (row.studies ?? [])
       .map((study) => {
         const classification = slackStudyClassification(study)
         return classification ? { studyName: study.studyName, classification } : null
       })
-      .filter((item): item is { studyName: string; classification: 'Suitable' | 'Likely Suitable' } => item !== null)
+      .filter(
+        (
+          item,
+        ): item is {
+          studyName: string
+          classification: 'Suitable' | 'Likely Suitable' | 'Unclear'
+        } => item !== null,
+      )
     if (positive.length === 0) continue
 
     const heading = slackDoctorHeading(row.cardiologistName)
@@ -310,9 +353,10 @@ function buildCandidateSlack(consults: UpcomingConsult[]): string {
     }
   }
 
-  const parts = ["**Today's potential candidates**", '']
+  const reportDate = candidateReportDateLabel(searchDateIso)
+  const parts = [`**Potential Candidate Report - ${reportDate}**`, '']
   if (doctorOrder.length === 0) {
-    parts.push('None.')
+    parts.push('No Suitable Candidates found.')
     return `${parts.join('\n')}\n`
   }
 
@@ -345,12 +389,16 @@ export default function ResearchHome() {
   const [batchError, setBatchError] = useState('')
   const [rescreenAlreadyAssessed, setRescreenAlreadyAssessed] = useState(false)
   const [copyResultsLabel, setCopyResultsLabel] = useState<'idle' | 'copied'>('idle')
+  const [slackConfigured, setSlackConfigured] = useState(false)
+  const [slackSendLabel, setSlackSendLabel] = useState<'idle' | 'sending' | 'sent'>('idle')
   const appliedBatchItems = useRef<Set<string>>(new Set())
   const copyResultsTimer = useRef<number>(0)
+  const slackSendTimer = useRef<number>(0)
 
   useEffect(
     () => () => {
       window.clearTimeout(copyResultsTimer.current)
+      window.clearTimeout(slackSendTimer.current)
     },
     [],
   )
@@ -359,12 +407,22 @@ export default function ResearchHome() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch('/api/research/llm/status')
-      if (!res.ok) throw new Error('Failed to check LLM status')
-      const data = (await res.json()) as LlmStatus
+      const [llmRes, slackRes] = await Promise.all([
+        fetch('/api/research/llm/status'),
+        fetch('/api/research/slack/status'),
+      ])
+      if (!llmRes.ok) throw new Error('Failed to check LLM status')
+      const data = (await llmRes.json()) as LlmStatus
       setStatus(data)
+      if (slackRes.ok) {
+        const slack = (await slackRes.json()) as { configured?: boolean }
+        setSlackConfigured(Boolean(slack.configured))
+      } else {
+        setSlackConfigured(false)
+      }
     } catch {
       setStatus(null)
+      setSlackConfigured(false)
       setError('Cannot reach the H1Stats API.')
     } finally {
       setLoading(false)
@@ -553,9 +611,12 @@ export default function ResearchHome() {
     }
   }
 
+  const canShareResults =
+    consultsLoaded && consults.length > 0 && batchJob?.status !== 'RUNNING'
+
   const copyBatchResults = async () => {
-    if (!batchJob || batchJob.status !== 'COMPLETED') return
-    const text = buildCandidateSlack(consults)
+    if (!canShareResults) return
+    const text = buildCandidateSlack(consults, consultFrom)
     try {
       await navigator.clipboard.writeText(text)
       setCopyResultsLabel('copied')
@@ -563,6 +624,28 @@ export default function ResearchHome() {
       copyResultsTimer.current = window.setTimeout(() => setCopyResultsLabel('idle'), 2000)
     } catch {
       setBatchError('Could not copy results to the clipboard.')
+    }
+  }
+
+  const sendBatchResultsToSlack = async () => {
+    if (!canShareResults || !slackConfigured) return
+    setBatchError('')
+    setSlackSendLabel('sending')
+    const text = buildCandidateSlack(consults, consultFrom)
+    try {
+      const res = await fetch('/api/research/slack/candidate-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Could not send to Slack')
+      setSlackSendLabel('sent')
+      window.clearTimeout(slackSendTimer.current)
+      slackSendTimer.current = window.setTimeout(() => setSlackSendLabel('idle'), 2000)
+    } catch (e) {
+      setSlackSendLabel('idle')
+      setBatchError(e instanceof Error ? e.message : 'Could not send to Slack')
     }
   }
 
@@ -639,7 +722,11 @@ export default function ResearchHome() {
             <input
               type="date"
               value={consultFrom}
-              onChange={(e) => setConsultFrom(e.target.value)}
+              onChange={(e) => {
+                const day = e.target.value
+                setConsultFrom(day)
+                setConsultTo(day)
+              }}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
             />
           </div>
@@ -696,6 +783,40 @@ export default function ResearchHome() {
                   />
                   Re-screen already assessed
                 </label>
+                {canShareResults && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void copyBatchResults()}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {copyResultsLabel === 'copied' ? 'Copied!' : 'Copy Results'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={!slackConfigured || slackSendLabel === 'sending'}
+                      title={
+                        slackConfigured
+                          ? 'Post this report to the configured Slack channel'
+                          : 'Configure ResearchSlack:WebhookUrl on the H1Stats server'
+                      }
+                      onClick={() => void sendBatchResultsToSlack()}
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      {slackSendLabel === 'sending'
+                        ? 'Sending…'
+                        : slackSendLabel === 'sent'
+                          ? 'Sent!'
+                          : 'Send to Slack'}
+                    </Button>
+                  </>
+                )}
                 {batchBusy ? (
                   <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void cancelBatchScreen()}>
                     <Square className="h-3.5 w-3.5" />
@@ -726,23 +847,9 @@ export default function ResearchHome() {
                         ? `Batch cancelled after ${batchProcessed} of ${batchJob.total}`
                         : `Batch finished: ${batchJob.completed} screened, ${batchJob.skipped} skipped, ${batchJob.failed} failed`}
                   </span>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-gray-500">
-                      {batchJob.completed} done · {batchJob.skipped} skipped · {batchJob.failed} failed
-                    </span>
-                    {batchJob.status === 'COMPLETED' && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5 h-7"
-                        onClick={() => void copyBatchResults()}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        {copyResultsLabel === 'copied' ? 'Copied!' : 'Copy Results'}
-                      </Button>
-                    )}
-                  </div>
+                  <span className="text-gray-500 shrink-0">
+                    {batchJob.completed} done · {batchJob.skipped} skipped · {batchJob.failed} failed
+                  </span>
                 </div>
                 <div className="h-1.5 rounded-full bg-gray-200 overflow-hidden">
                   <div

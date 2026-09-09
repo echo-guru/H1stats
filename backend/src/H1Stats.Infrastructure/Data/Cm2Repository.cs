@@ -2672,6 +2672,34 @@ public class Cm2Repository : ICm2Repository
             _settings.Cm2OracleConnectionString, Schema, dateFrom, dateTo, site, cardiologistId, ct);
 
     /// <inheritdoc />
+    public Task<UnactionedConsultReferralResult> GetUnactionedConsultReferralsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default) =>
+        UnactionedConsultReferralStore.GetUnactionedConsultReferralsAsync(
+            _settings.Cm2OracleConnectionString, Schema, dateFrom, dateTo, cardiologistId, ct);
+
+    /// <inheritdoc />
+    public Task<(StudyReportFile? File, string? Error)> GetUnactionedConsultReferralFileAsync(
+        string documentId, CancellationToken ct = default) =>
+        UnactionedConsultReferralStore.GetConsultReferralPdfAsync(
+            _settings.Cm2OracleConnectionString,
+            Schema,
+            documentId,
+            _db.GetLiveSettings().Cm2ReportRoot,
+            ct);
+
+    /// <inheritdoc />
+    public Task<MissingCtcaDocResult> GetMissingCtcaDocsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default) =>
+        MissingCtcaDocStore.GetMissingCtcaDocsAsync(
+            _settings.Cm2OracleConnectionString, Schema, dateFrom, dateTo, cardiologistId, ct);
+
+    /// <inheritdoc />
     public Task<(bool Ok, string? Error)> UpdateAppointmentNoteAsync(
         string appointmentId, string? note, CancellationToken ct = default) =>
         PinkRecallWorklistStore.UpdateAppointmentNoteAsync(

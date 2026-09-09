@@ -124,7 +124,7 @@ public sealed class ResearchLlmClient : IResearchLlmClient
             return new ResearchLlmChatResult(
                 false,
                 null,
-                "LLM did not respond in time (timed out after the configured wait). This is the llama.cpp completion, not a CM2 file fetch.",
+                $"LLM did not respond in time (timed out after {_settings.TimeoutSeconds} seconds). This is the llama.cpp completion, not a CM2 file fetch.",
                 modelId);
         }
         catch (HttpRequestException ex)
@@ -166,7 +166,7 @@ public sealed class ResearchLlmClient : IResearchLlmClient
             ["model"] = model,
             ["messages"] = messageArray,
             ["temperature"] = 0,
-            ["max_tokens"] = 2048,
+            ["max_tokens"] = 1536,
             ["chat_template_kwargs"] = new JsonObject
             {
                 ["enable_thinking"] = false,

@@ -13,6 +13,7 @@ public class ResearchController : ControllerBase
     private readonly IResearchScreeningService _screening;
     private readonly IResearchScreeningResultStore _screeningResults;
     private readonly IResearchScreeningJobService _screeningJobs;
+    private readonly IResearchSlackClient _slack;
     private readonly ICm2Repository _cm2;
 
     public ResearchController(
@@ -21,6 +22,7 @@ public class ResearchController : ControllerBase
         IResearchScreeningService screening,
         IResearchScreeningResultStore screeningResults,
         IResearchScreeningJobService screeningJobs,
+        IResearchSlackClient slack,
         ICm2Repository cm2)
     {
         _llm = llm;
@@ -28,12 +30,33 @@ public class ResearchController : ControllerBase
         _screening = screening;
         _screeningResults = screeningResults;
         _screeningJobs = screeningJobs;
+        _slack = slack;
         _cm2 = cm2;
     }
 
     [HttpGet("llm/status")]
     public async Task<IActionResult> GetLlmStatus(CancellationToken ct) =>
         Ok(await _llm.GetStatusAsync(ct));
+
+    [HttpGet("slack/status")]
+    public IActionResult GetSlackStatus() => Ok(_slack.GetStatus());
+
+    [HttpPost("slack/candidate-report")]
+    public async Task<IActionResult> PostCandidateReport(
+        [FromBody] PostResearchSlackReportRequest? request,
+        CancellationToken ct)
+    {
+        var text = request?.Text?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(text))
+            return BadRequest(new { message = "Report text is required." });
+        if (text.Length > 40_000)
+            return BadRequest(new { message = "Report text is too long for Slack." });
+
+        var (ok, error) = await _slack.PostCandidateReportAsync(text, ct);
+        if (!ok)
+            return BadRequest(new { message = error ?? "Could not post to Slack." });
+        return Ok(new { ok = true });
+    }
 
     [HttpGet("upcoming-consults")]
     public async Task<IActionResult> GetUpcomingConsults(

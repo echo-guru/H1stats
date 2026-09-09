@@ -6,9 +6,30 @@ export interface VersionEntry {
 }
 
 /** Current product version shown in Settings and System Health. */
-export const APP_VERSION = '1.7.0'
+export const APP_VERSION = '1.9.0'
 
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: '1.9.0',
+    date: '7 Sep 2026',
+    title: 'TEE/IOE Progress Report',
+    changes: [
+      'Reports: TEE/IOE Progress — past Transoesophageal Echo and intra-operative TEE diary bookings that are not yet complete.',
+      'Cross-checks each booking for a matching Syngo study and a CM2 TEST report; rows with both are hidden.',
+      'Patient list with date range and cardiologist filters; click a row to expand booking notes. Status is booked, arrived, not in Syngo, awaiting report, or not in CM2 (Syngo study with no matching Oracle booking or TEST).',
+    ],
+  },
+  {
+    version: '1.8.0',
+    date: '4 Sep 2026',
+    title: 'Unactioned consult referrals worklist',
+    changes: [
+      'Worklists tab: Unactioned consult referrals — Cons Ref documents imported onto a patient with no unarrived Cardiology or Admin recall.',
+      'Filters by import date (defaults to today) and H1 cardiologist; shows an upcoming consult booking when one exists.',
+      'Click a Cons Ref title to open the referral PDF in the browser; expanded rows show consult booking notes.',
+      'Worklists tab: Missing CTCA docs — past CT Coronary Angiogram bookings with no imported test/results CTCA document (one row per patient).',
+    ],
+  },
   {
     version: '1.7.0',
     date: '3 Sep 2026',

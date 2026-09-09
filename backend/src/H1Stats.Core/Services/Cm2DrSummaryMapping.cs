@@ -21,6 +21,21 @@ public static class Cm2DrSummaryMapping
     /// </summary>
     public static readonly IReadOnlyList<int> DccsOccServiceIds = [6, 101];
 
+    /// <summary>Outpatient Transoesophageal Echo diary service.</summary>
+    public const int TeeOccServiceOutpatient = 3;
+
+    /// <summary>Inpatient Transoesophageal Echo diary service.</summary>
+    public const int TeeOccServiceInpatient = 4;
+
+    /// <summary>Intra-operative Transoesophageal Echo (IOE) diary service.</summary>
+    public const int IoeOccService = 5;
+
+    /// <summary>TEE/IOE diary bookings (excludes cardioversion 6/101).</summary>
+    public static readonly IReadOnlyList<int> TeeIoeOccServiceIds =
+        [TeeOccServiceOutpatient, TeeOccServiceInpatient, IoeOccService];
+
+    public static bool IsIoeOccService(int occServiceRid) => occServiceRid == IoeOccService;
+
     /// <summary>Sentinel column id for all Hearts 1st reporting cardiologists combined.</summary>
     public const string AllDoctorsColumnId = "all-drs-total";
 

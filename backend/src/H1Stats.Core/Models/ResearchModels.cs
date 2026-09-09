@@ -146,6 +146,68 @@ public static class ResearchOverall
         return ResearchSuitability.PossiblySuitable;
     }
 
+    public static string BuildSummary(
+        string overall,
+        IReadOnlyList<ResearchCriterionAssessment> inclusion,
+        IReadOnlyList<ResearchCriterionAssessment> exclusion,
+        int correctedStatuses = 0,
+        int derivedFacts = 0)
+    {
+        var core = overall switch
+        {
+            ResearchSuitability.LikelyNotSuitable => HardFailSummary(inclusion, exclusion),
+            ResearchSuitability.LikelySuitable => LikelySuitableSummary(inclusion, exclusion),
+            ResearchSuitability.NeedsReview =>
+                "Needs review: one or more criteria could not be determined from available records.",
+            ResearchSuitability.PossiblySuitable =>
+                "Possibly suitable; clinician review recommended.",
+            _ => "Screening complete.",
+        };
+
+        var notes = new List<string>();
+        if (correctedStatuses > 0)
+            notes.Add($"Adjusted {correctedStatuses} criterion status(es) to match the stated reason.");
+        if (derivedFacts > 0)
+            notes.Add($"Applied {derivedFacts} calculated BMI / documented therapy finding(s) from the source documents.");
+
+        return notes.Count == 0 ? core : $"{core} {string.Join(" ", notes)}";
+    }
+
+    private static string HardFailSummary(
+        IReadOnlyList<ResearchCriterionAssessment> inclusion,
+        IReadOnlyList<ResearchCriterionAssessment> exclusion)
+    {
+        var failedInclusion = inclusion.FirstOrDefault(a => a.Status == CriterionStatus.NotMet);
+        if (failedInclusion is not null)
+        {
+            var detail = string.IsNullOrWhiteSpace(failedInclusion.Reason)
+                ? failedInclusion.Criterion
+                : failedInclusion.Reason.Trim();
+            return $"Likely not suitable: inclusion not met — {detail}";
+        }
+
+        var hitExclusion = exclusion.FirstOrDefault(a => a.Status == CriterionStatus.Met);
+        if (hitExclusion is not null)
+        {
+            var detail = string.IsNullOrWhiteSpace(hitExclusion.Reason)
+                ? hitExclusion.Criterion
+                : hitExclusion.Reason.Trim();
+            return $"Likely not suitable: exclusion present — {detail}";
+        }
+
+        return "Likely not suitable based on the assessed criteria.";
+    }
+
+    private static string LikelySuitableSummary(
+        IReadOnlyList<ResearchCriterionAssessment> inclusion,
+        IReadOnlyList<ResearchCriterionAssessment> exclusion)
+    {
+        var unclear = inclusion.Concat(exclusion).Any(a => a.Status == CriterionStatus.Unclear);
+        return unclear
+            ? "Likely suitable: Age, BMI, diabetes and HbA1c are favourable; other criteria remain unclear."
+            : "Likely suitable: inclusion criteria are met and exclusion criteria do not apply.";
+    }
+
     public static ResearchAppointmentScreeningResult PromoteSaved(ResearchAppointmentScreeningResult result)
     {
         if (result.Studies.Count == 0)
@@ -158,12 +220,20 @@ public static class ResearchOverall
             var inclusion = study.Inclusion.Select(ResearchAgeCriterion.Apply).ToList();
             var exclusion = study.Exclusion.Select(ResearchAgeCriterion.Apply).ToList();
             var overall = FromCriteria(inclusion, exclusion);
+            var summary = BuildSummary(overall, inclusion, exclusion);
             if (!inclusion.SequenceEqual(study.Inclusion)
                 || !exclusion.SequenceEqual(study.Exclusion)
-                || overall != study.Overall)
+                || overall != study.Overall
+                || !string.Equals(summary, study.Summary, StringComparison.Ordinal))
             {
                 changed = true;
-                studies.Add(study with { Inclusion = inclusion, Exclusion = exclusion, Overall = overall });
+                studies.Add(study with
+                {
+                    Inclusion = inclusion,
+                    Exclusion = exclusion,
+                    Overall = overall,
+                    Summary = summary,
+                });
             }
             else
             {
@@ -407,6 +477,10 @@ public record ScreenAppointmentRequest(
 public record OverrideResearchSuitabilityRequest(
     string StudyId,
     string Overall
+);
+
+public record PostResearchSlackReportRequest(
+    string Text
 );
 
 public static class ResearchScreeningJobStatus

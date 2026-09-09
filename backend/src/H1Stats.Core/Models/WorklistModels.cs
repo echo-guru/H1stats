@@ -31,6 +31,67 @@ public record PinkRecallWorklistResult(
     IReadOnlyList<PinkRecallWorklistRow> Rows
 );
 
+/// <summary>
+/// Imported consult-referral document (DOCUMENTS, category 4, title Cons Ref)
+/// with no unarrived Cardiology/Admin recall for that patient.
+/// </summary>
+public record UnactionedConsultReferralRow(
+    string DocumentId,
+    string PatientRid,
+    string PatientCmId,
+    string LastName,
+    string FirstName,
+    DateOnly? DateOfBirth,
+    string? CardiologistId,
+    string? CardiologistName,
+    DateOnly DocumentDate,
+    string? DocumentTitle,
+    string? DocumentPath,
+    int DocumentCategory,
+    DateOnly? UpcomingConsultDate,
+    string? UpcomingConsultTitle,
+    string? UpcomingConsultNote
+);
+
+public record UnactionedConsultReferralResult(
+    DateOnly DateFrom,
+    DateOnly DateTo,
+    string? CardiologistId,
+    int Count,
+    IReadOnlyList<UnactionedConsultReferralRow> Rows
+);
+
+/// <summary>
+/// Past CT Coronary Angiogram diary booking with no imported test/results (DOC_CATEGORY 1) CTCA document.
+/// One row per patient (most recent unmatched booking).
+/// </summary>
+public record MissingCtcaDocRow(
+    string AppointmentId,
+    string PatientRid,
+    string PatientCmId,
+    string LastName,
+    string FirstName,
+    DateOnly? DateOfBirth,
+    string? CardiologistId,
+    string? CardiologistName,
+    DateOnly AppointmentDate,
+    string? AppointmentTime,
+    bool Arrived,
+    string? AppointmentNote,
+    string? RoomName,
+    string? SiteName,
+    string ServiceTitle,
+    int BookingCount
+);
+
+public record MissingCtcaDocResult(
+    DateOnly DateFrom,
+    DateOnly DateTo,
+    string? CardiologistId,
+    int Count,
+    IReadOnlyList<MissingCtcaDocRow> Rows
+);
+
 /// <summary>Free diary start times for an appointment's room/day/duration (15-min slots).</summary>
 public record AvailableDiarySlotsResult(
     string AppointmentId,

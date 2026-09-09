@@ -32,6 +32,18 @@ public interface IPhysicianStatisticsRepository
     Task<PhysicianStatisticsReport> GetReportAsync(DateOnly dateFrom, DateOnly dateTo, string? physician, CancellationToken ct = default);
 }
 
+/// <summary>
+/// Past TEE/IOE diary bookings cross-checked against Syngo studies and CM2 TEST reports.
+/// </summary>
+public interface ITeeIoeProgressRepository
+{
+    Task<TeeIoeProgressResult> GetReportAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default);
+}
+
 public interface ICm2Repository
 {
     Task<bool> TestConnectionAsync(CancellationToken ct = default);
@@ -81,6 +93,27 @@ public interface ICm2Repository
         DateOnly? dateFrom = null,
         DateOnly? dateTo = null,
         string? site = null,
+        string? cardiologistId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Consult-referral documents imported onto a patient with no unarrived pink/yellow recall.
+    /// </summary>
+    Task<UnactionedConsultReferralResult> GetUnactionedConsultReferralsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default);
+    Task<(StudyReportFile? File, string? Error)> GetUnactionedConsultReferralFileAsync(
+        string documentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Past CTCA diary bookings with no imported test/results CTCA document. One row per patient.
+    /// Date range is clamped to yesterday (future bookings excluded).
+    /// </summary>
+    Task<MissingCtcaDocResult> GetMissingCtcaDocsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
         string? cardiologistId = null,
         CancellationToken ct = default);
 
@@ -147,6 +180,18 @@ public interface ICm2DevDatabase
         string? site = null,
         string? cardiologistId = null,
         CancellationToken ct = default);
+    Task<UnactionedConsultReferralResult> GetUnactionedConsultReferralsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default);
+    Task<(StudyReportFile? File, string? Error)> GetUnactionedConsultReferralFileAsync(
+        string documentId, CancellationToken ct = default);
+    Task<MissingCtcaDocResult> GetMissingCtcaDocsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default);
     Task<(bool Ok, string? Error)> UpdateAppointmentNoteAsync(
         string appointmentId, string? note, CancellationToken ct = default);
     Task<(bool Ok, string? Error, string? ServiceTypeId, string? ServiceTitle)> UpdateAppointmentServiceTypeAsync(
@@ -171,6 +216,13 @@ public interface IResearchLlmClient
         IReadOnlyList<ResearchLlmChatMessage> messages,
         string? modelId = null,
         CancellationToken ct = default);
+}
+
+/// <summary>Posts Research candidate reports to Slack. The browser never sees the webhook URL.</summary>
+public interface IResearchSlackClient
+{
+    ResearchSlackStatus GetStatus();
+    Task<(bool Ok, string? Error)> PostCandidateReportAsync(string markdownText, CancellationToken ct = default);
 }
 
 /// <summary>Screens a CM2 consult appointment against active studies via the local LLM.</summary>

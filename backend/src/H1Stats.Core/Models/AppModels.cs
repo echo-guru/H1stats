@@ -54,6 +54,7 @@ public static class ClinicalReportCatalog
         "/clinical/reporting-dr-cm2",
         "/clinical/dr-summary-cm2",
         "/clinical/james-report",
+        "/clinical/tee-ioe-progress",
         "/clinical/top-referring-doctors-cm2",
         "/clinical/top-referring-practices-cm2",
         "/clinical/referrers-growth-cm2",
@@ -356,5 +357,11 @@ public record ResearchLlmStatus(
     string Label,
     string? ModelId,
     int ContextSize,
+    string Message
+);
+
+/// <summary>Whether the Research Slack Incoming Webhook is configured. Never includes the URL.</summary>
+public record ResearchSlackStatus(
+    bool Configured,
     string Message
 );

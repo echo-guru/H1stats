@@ -17,6 +17,11 @@ builder.Services.Configure<ResearchLlmSettings>(options =>
     builder.Configuration.GetSection(ResearchLlmSettings.SectionName).Bind(options);
     ResearchLlmSettings.ApplyEnvironmentOverrides(options);
 });
+builder.Services.Configure<ResearchSlackSettings>(options =>
+{
+    builder.Configuration.GetSection(ResearchSlackSettings.SectionName).Bind(options);
+    ResearchSlackSettings.ApplyEnvironmentOverrides(options);
+});
 
 // Module registry — add future modules here
 builder.Services.AddSingleton<ModuleRegistry>(_ => new ModuleRegistry([
@@ -36,15 +41,17 @@ builder.Services.AddSingleton<IResearchScreeningResultStore>(_ =>
 builder.Services.AddScoped<ICm2Repository, Cm2Repository>();
 builder.Services.AddSingleton<ICm2DevDatabase, Cm2DevDatabase>();
 builder.Services.AddSingleton<IResearchScreeningJobService, ResearchScreeningJobService>();
-builder.Services.AddScoped<IResearchScreeningService>(sp =>
-    new ResearchScreeningService(
-        sp.GetRequiredService<IResearchLlmClient>(),
-        sp.GetRequiredService<IResearchStudyStore>(),
-        sp.GetRequiredService<IResearchScreeningResultStore>(),
-        sp.GetRequiredService<ICm2Repository>()));
+        builder.Services.AddScoped<IResearchScreeningService>(sp =>
+            new ResearchScreeningService(
+                sp.GetRequiredService<IResearchLlmClient>(),
+                sp.GetRequiredService<IResearchStudyStore>(),
+                sp.GetRequiredService<IResearchScreeningResultStore>(),
+                sp.GetRequiredService<ICm2Repository>(),
+                sp.GetRequiredService<IOptions<ResearchLlmSettings>>()));
 builder.Services.AddSingleton<IUserAdminService>(sp => (AuthService)sp.GetRequiredService<IAuthService>());
 builder.Services.AddSingleton<IDatabaseConnectionService, DatabaseConnectionService>();
 builder.Services.AddScoped<IPhysicianStatisticsRepository, PhysicianStatisticsRepository>();
+builder.Services.AddScoped<ITeeIoeProgressRepository, TeeIoeProgressRepository>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddHttpClient<IResearchLlmClient, ResearchLlmClient>((sp, client) =>
 {
@@ -52,6 +59,7 @@ builder.Services.AddHttpClient<IResearchLlmClient, ResearchLlmClient>((sp, clien
     var timeout = Math.Clamp(settings.TimeoutSeconds, 1, 3600);
     client.Timeout = TimeSpan.FromSeconds(timeout);
 });
+builder.Services.AddHttpClient<IResearchSlackClient, ResearchSlackClient>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

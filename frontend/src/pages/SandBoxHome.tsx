@@ -110,7 +110,7 @@ export default function SandBoxHome() {
           showPageHeader
           allowMutations
           title="Worklists (CM2 DEV)"
-          subtitle="Same pink-recall worklist as production, queried only against CM2DEV — edits apply to DEV only"
+          subtitle="Same worklists as production, queried only against CM2DEV — edits apply to DEV only"
           noteSavedMessage="Note saved to CM2 DEV schedule"
         />
       </div>

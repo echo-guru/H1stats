@@ -10,11 +10,16 @@ public class ClinicalController : ControllerBase
 {
     private readonly IPhysicianStatisticsRepository _syngo;
     private readonly ICm2Repository _cm2;
+    private readonly ITeeIoeProgressRepository _teeIoe;
 
-    public ClinicalController(IPhysicianStatisticsRepository syngo, ICm2Repository cm2)
+    public ClinicalController(
+        IPhysicianStatisticsRepository syngo,
+        ICm2Repository cm2,
+        ITeeIoeProgressRepository teeIoe)
     {
         _syngo = syngo;
         _cm2 = cm2;
+        _teeIoe = teeIoe;
     }
 
     [HttpGet("physicians")]
@@ -42,6 +47,39 @@ public class ClinicalController : ControllerBase
 
         var report = await _syngo.GetReportAsync(from, to, physician, ct);
         return Ok(report);
+    }
+
+    /// <summary>
+    /// Past TEE/IOE diary bookings still in progress, plus Syngo TEE/IOE studies with
+    /// no matching CM2 booking or TEST. Complete rows (Syngo study + report) are omitted.
+    /// Defaults to the last 90 past days. Future dates are clamped to yesterday.
+    /// </summary>
+    [HttpGet("tee-ioe-progress")]
+    public async Task<IActionResult> GetTeeIoeProgress(
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] string? cardiologist,
+        CancellationToken ct)
+    {
+        var yesterday = DateOnly.FromDateTime(DateTime.Today).AddDays(-1);
+        if (string.IsNullOrWhiteSpace(dateFrom) && string.IsNullOrWhiteSpace(dateTo))
+        {
+            dateFrom = yesterday.AddDays(-89).ToString("yyyy-MM-dd");
+            dateTo = yesterday.ToString("yyyy-MM-dd");
+        }
+
+        if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var report = await _teeIoe.GetReportAsync(from, to, cardiologist, ct);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
     }
 
     [HttpGet("cm2/physicians")]

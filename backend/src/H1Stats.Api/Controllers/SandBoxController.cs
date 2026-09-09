@@ -80,6 +80,106 @@ public class SandBoxController : ControllerBase
         }
     }
 
+    /// <summary>Consult-referral documents on CM2 DEV with no unarrived recall.</summary>
+    [HttpGet("workllists/unactioned-consult-referrals")]
+    public async Task<IActionResult> GetUnactionedConsultReferrals(
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] string? cardiologist,
+        CancellationToken ct)
+    {
+        var hasFrom = !string.IsNullOrWhiteSpace(dateFrom);
+        var hasTo = !string.IsNullOrWhiteSpace(dateTo);
+
+        DateOnly from;
+        DateOnly to;
+        if (!hasFrom && !hasTo)
+        {
+            from = to = DateOnly.FromDateTime(DateTime.Today);
+        }
+        else
+        {
+            if (!hasFrom || !DateOnly.TryParse(dateFrom, out var parsedFrom))
+                return BadRequest(new { message = "Invalid or missing dateFrom (leave both dates blank for today)" });
+            if (!hasTo || !DateOnly.TryParse(dateTo, out var parsedTo))
+                return BadRequest(new { message = "Invalid or missing dateTo (leave both dates blank for today)" });
+            if (parsedFrom > parsedTo)
+                return BadRequest(new { message = "dateFrom must be on or before dateTo" });
+            from = parsedFrom;
+            to = parsedTo;
+        }
+
+        try
+        {
+            var result = await _cm2Dev.GetUnactionedConsultReferralsAsync(from, to, cardiologist, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("workllists/unactioned-consult-referrals/{documentId}/file")]
+    public async Task<IActionResult> GetUnactionedConsultReferralFile(
+        string documentId, CancellationToken ct)
+    {
+        var (file, error) = await _cm2Dev.GetUnactionedConsultReferralFileAsync(documentId, ct);
+        if (file is null)
+        {
+            if (string.Equals(error, "Document not found", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(error, "Invalid document id", StringComparison.OrdinalIgnoreCase)
+                || (error is not null && error.Contains("not found", StringComparison.OrdinalIgnoreCase)))
+                return NotFound(new { message = error });
+            return BadRequest(new { message = error ?? "Failed to open referral PDF" });
+        }
+
+        Response.Headers.ContentDisposition = $"inline; filename=\"{file.FileName.Replace("\"", "")}\"";
+        return PhysicalFile(file.FullPath, file.ContentType);
+    }
+
+    /// <summary>Past CTCA bookings on CM2 DEV with no imported test/results CTCA document.</summary>
+    [HttpGet("workllists/missing-ctca-docs")]
+    public async Task<IActionResult> GetMissingCtcaDocs(
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] string? cardiologist,
+        CancellationToken ct)
+    {
+        var yesterday = DateOnly.FromDateTime(DateTime.Today).AddDays(-1);
+        var hasFrom = !string.IsNullOrWhiteSpace(dateFrom);
+        var hasTo = !string.IsNullOrWhiteSpace(dateTo);
+
+        DateOnly from;
+        DateOnly to;
+        if (!hasFrom && !hasTo)
+        {
+            from = yesterday.AddDays(-29);
+            to = yesterday;
+        }
+        else
+        {
+            if (!hasFrom || !DateOnly.TryParse(dateFrom, out var parsedFrom))
+                return BadRequest(new { message = "Invalid or missing dateFrom (leave both dates blank for the last 30 past days)" });
+            if (!hasTo || !DateOnly.TryParse(dateTo, out var parsedTo))
+                return BadRequest(new { message = "Invalid or missing dateTo (leave both dates blank for the last 30 past days)" });
+            if (parsedFrom > parsedTo)
+                return BadRequest(new { message = "dateFrom must be on or before dateTo" });
+            from = parsedFrom;
+            to = parsedTo;
+        }
+
+        try
+        {
+            var result = await _cm2Dev.GetMissingCtcaDocsAsync(from, to, cardiologist, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     public sealed record UpdateAppointmentNoteRequest(string? Note);
 
     [HttpPut("workllists/appointments/{appointmentId}/note")]

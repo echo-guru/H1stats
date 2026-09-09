@@ -2,8 +2,10 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using H1Stats.Core.Configuration;
 using H1Stats.Core.Interfaces;
 using H1Stats.Core.Models;
+using Microsoft.Extensions.Options;
 
 namespace H1Stats.Infrastructure.Research;
 
@@ -16,17 +18,20 @@ public sealed class ResearchScreeningService : IResearchScreeningService
     private readonly IResearchStudyStore _studies;
     private readonly IResearchScreeningResultStore _results;
     private readonly ICm2Repository _cm2;
+    private readonly ResearchLlmSettings _llmSettings;
 
     public ResearchScreeningService(
         IResearchLlmClient llm,
         IResearchStudyStore studies,
         IResearchScreeningResultStore results,
-        ICm2Repository cm2)
+        ICm2Repository cm2,
+        IOptions<ResearchLlmSettings> llmOptions)
     {
         _llm = llm;
         _studies = studies;
         _results = results;
         _cm2 = cm2;
+        _llmSettings = llmOptions.Value;
     }
 
     public async Task<ResearchAppointmentScreeningResult> ScreenAppointmentAsync(
@@ -376,10 +381,11 @@ public sealed class ResearchScreeningService : IResearchScreeningService
         ResearchDerivedFacts? facts,
         bool fullScreen)
     {
+        var promptPatient = patient with { Notes = FitNotesForLlm(patient.Notes) };
         var messages = new ResearchLlmChatMessage[]
         {
             new("system", ClinicalSystemPrompt),
-            new("user", BuildUserPrompt(patient, study, fullScreen)),
+            new("user", BuildUserPrompt(promptPatient, study, fullScreen)),
         };
 
         var completion = await _llm.CompleteChatAsync(messages, modelId, ct);
@@ -603,13 +609,7 @@ public sealed class ResearchScreeningService : IResearchScreeningService
             a.Reason.Contains("[corrected from ", StringComparison.OrdinalIgnoreCase));
 
         var overall = ComputeOverall(inclusion, exclusion);
-        var summary = screening.Summary;
-        if (corrected > 0)
-        {
-            summary = string.IsNullOrWhiteSpace(summary)
-                ? $"Adjusted {corrected} criterion status(es) to match the stated reason."
-                : $"{summary.Trim()} Adjusted {corrected} criterion status(es) to match the stated reason.";
-        }
+        var summary = ResearchOverall.BuildSummary(overall, inclusion, exclusion, correctedStatuses: corrected);
 
         return screening with
         {
@@ -638,13 +638,12 @@ public sealed class ResearchScreeningService : IResearchScreeningService
         var exclusion = screening.Exclusion
             .Select(a => ApplyDerivedFact(a, isExclusion: true, facts, ref changed))
             .ToList();
-        if (changed == 0)
-            return screening with { Inclusion = inclusion, Exclusion = exclusion };
 
+        var corrected = inclusion.Concat(exclusion).Count(a =>
+            a.Reason.Contains("[corrected from ", StringComparison.OrdinalIgnoreCase));
         var overall = ComputeOverall(inclusion, exclusion);
-        var summary = string.IsNullOrWhiteSpace(screening.Summary)
-            ? $"Applied {changed} calculated BMI / documented therapy finding(s) from the source documents."
-            : $"{screening.Summary.Trim()} Applied {changed} calculated BMI / documented therapy finding(s) from the source documents.";
+        var summary = ResearchOverall.BuildSummary(
+            overall, inclusion, exclusion, correctedStatuses: corrected, derivedFacts: changed);
 
         return screening with
         {
@@ -869,6 +868,22 @@ public sealed class ResearchScreeningService : IResearchScreeningService
 
     private static ResearchDerivedFacts WithConsultAge(ResearchDerivedFacts facts, ResearchUpcomingConsult consult)
         => facts.WithAge(consult.AgeYears, consult.AgeYears is null ? null : "CM2 date of birth");
+
+    private string FitNotesForLlm(string notes)
+    {
+        if (string.IsNullOrEmpty(notes))
+            return notes;
+
+        // Rough English token estimate (~4 chars/token). Leave room for system prompt,
+        // study criteria, and the JSON completion inside the llama.cpp context window.
+        var context = Math.Clamp(_llmSettings.ContextSize, 2048, 128_000);
+        var budgetChars = Math.Max(4000, (context - 2800) * 4);
+        if (notes.Length <= budgetChars)
+            return notes;
+
+        return notes[..budgetChars].TrimEnd()
+            + "\n\n[Source text truncated to fit the local LLM context window.]";
+    }
 
     private static string ComputeOverall(
         IReadOnlyList<ResearchCriterionAssessment> inclusion,

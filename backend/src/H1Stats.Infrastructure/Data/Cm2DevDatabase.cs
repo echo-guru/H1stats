@@ -53,6 +53,27 @@ public sealed class Cm2DevDatabase : ICm2DevDatabase
         PinkRecallWorklistStore.GetUnarrivedPinkRecallsAsync(
             ConnectionString, Schema, dateFrom, dateTo, site, cardiologistId, ct);
 
+    public Task<UnactionedConsultReferralResult> GetUnactionedConsultReferralsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default) =>
+        UnactionedConsultReferralStore.GetUnactionedConsultReferralsAsync(
+            ConnectionString, Schema, dateFrom, dateTo, cardiologistId, ct);
+
+    public Task<(StudyReportFile? File, string? Error)> GetUnactionedConsultReferralFileAsync(
+        string documentId, CancellationToken ct = default) =>
+        UnactionedConsultReferralStore.GetConsultReferralPdfAsync(
+            ConnectionString, Schema, documentId, _db.GetLiveSettings().Cm2ReportRoot, ct);
+
+    public Task<MissingCtcaDocResult> GetMissingCtcaDocsAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        string? cardiologistId = null,
+        CancellationToken ct = default) =>
+        MissingCtcaDocStore.GetMissingCtcaDocsAsync(
+            ConnectionString, Schema, dateFrom, dateTo, cardiologistId, ct);
+
     public Task<(bool Ok, string? Error)> UpdateAppointmentNoteAsync(
         string appointmentId, string? note, CancellationToken ct = default) =>
         PinkRecallWorklistStore.UpdateAppointmentNoteAsync(

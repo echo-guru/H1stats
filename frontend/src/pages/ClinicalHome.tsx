@@ -35,6 +35,12 @@ const REPORTING_DR_ACTIONS: ClinicalAction[] = [
     path: '/clinical/james-report',
     icon: BarChart3,
   },
+  {
+    title: 'TEE/IOE Progress Report',
+    description: 'Past TEE and IOE bookings still in progress — booked, arrived, not in Syngo, awaiting a CM2 report, or a Syngo study not in CM2.',
+    path: '/clinical/tee-ioe-progress',
+    icon: ClipboardList,
+  },
 ]
 
 const REFERRING_DR_ACTIONS: ClinicalAction[] = [

@@ -61,6 +61,20 @@ REPORTS.TEST_RID = TEST.TEST_RID          (optional; left join)
 - Consult reporting cardiologist is `CONSULT.USER_LIST_RID` (same ID space as `TEST.CARDIOLOGIST1`).
 - Intra-operative TEE (IOE) is `TEST_REQUIRED = 4` with theatre ward (`WARD` 20 or 24).
 
+### Diary TEE / IOE bookings
+
+Past TEE/IOE progress uses the diary, not `TEST`, as the starting list:
+
+| `SCHEDULE_OCC_SERVICE_RID` | Title | Kind |
+|----------------------------|-------|------|
+| 3 | Transoesophageal Echo | TEE |
+| 4 | Inpatient Transoesophageal Echo | TEE |
+| 5 | Intra-operative Transoesophageal Echo | IOE |
+
+Do not include cardioversion (6 / 101). Match a Syngo `DOSR_STUDY` (description TEE / IOE) and a `TEST` report (`TEST_REQUIRED = 4`, `REPORT_PATH` present) on the same patient within 7 days of the appointment.
+
+The reverse gap is also listed: a Syngo TEE/IOE study in the date range with no matching CM2 diary booking and no matching `TEST` (`TEST_REQUIRED = 4`).
+
 ---
 
 ## Reporting Cardiologist
