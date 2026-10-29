@@ -52,11 +52,36 @@ public interface ICm2Repository
         DateOnly dateFrom, DateOnly dateTo, string? cardiologist, CancellationToken ct = default);
     Task<IReadOnlyList<SiteOption>> GetSitesAsync(CancellationToken ct = default);
     Task<TopReferringDoctorsReport> GetTopReferringDoctorsAsync(
-        DateOnly dateFrom, DateOnly dateTo, int topN, string? investigationType, string? site, CancellationToken ct = default);
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        int topN,
+        IReadOnlyList<string>? investigationTypes,
+        string? site,
+        string? ward = null,
+        bool excludeH1Doctors = false,
+        CancellationToken ct = default);
+    Task<XmasMarketingReport> GetXmasMarketingReportAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        int topN,
+        IReadOnlyList<string>? investigationTypes,
+        string? site,
+        string? ward = null,
+        bool excludeH1Doctors = false,
+        CancellationToken ct = default);
     Task<TopReferringPracticesReport> GetTopReferringPracticesAsync(
-        DateOnly dateFrom, DateOnly dateTo, int topN, string? site, CancellationToken ct = default);
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        int topN,
+        string? site,
+        bool excludeHearts1st = false,
+        CancellationToken ct = default,
+        IReadOnlyList<string>? investigationTypes = null,
+        string? ward = null,
+        bool excludeH1Doctors = false,
+        bool includeConsults = false);
     Task<ReferrersGrowthReport> GetReferrersGrowthByQuarterAsync(
-        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, string? site, CancellationToken ct = default);
+        int year, int quarter, int topN, string? investigationType, string? sortBy, string? mode, string? site, int quarterSpan = 2, CancellationToken ct = default);
     Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringDoctorsAsync(string query, CancellationToken ct = default);
     Task<IReadOnlyList<ReferrerSearchHit>> SearchReferringPracticesAsync(string query, CancellationToken ct = default);
     Task<PracticeDoctorsReport> GetPracticeDoctorsAsync(
@@ -73,10 +98,13 @@ public interface ICm2Repository
     Task<DrSummaryReport> GetDrSummaryHistoryAsync(
         string? cardiologistId, int year, int month, CancellationToken ct = default);
     /// <summary>
-    /// James Report: Echo, SE/DSE, and consults by site for the current year (partial)
-    /// plus the prior two calendar years, broken down by quarter.
+    /// James Report: site volumes by calendar quarter for the selected date range and tests.
     /// </summary>
-    Task<JamesReport> GetJamesReportAsync(CancellationToken ct = default);
+    Task<JamesReport> GetJamesReportAsync(
+        DateOnly dateFrom,
+        DateOnly dateTo,
+        IReadOnlyList<string> testCodes,
+        CancellationToken ct = default);
     /// <summary>
     /// Upcoming Initial / Follow-up consult diary bookings (SMS module pattern).
     /// </summary>
@@ -223,6 +251,14 @@ public interface IResearchSlackClient
 {
     ResearchSlackStatus GetStatus();
     Task<(bool Ok, string? Error)> PostCandidateReportAsync(string markdownText, CancellationToken ct = default);
+}
+
+/// <summary>On/off gate for weekday auto-screen + Slack posting.</summary>
+public interface IResearchDailyAutomationStore
+{
+    bool IsEnabled { get; }
+    ResearchDailyAutomationStatus GetStatus();
+    ResearchDailyAutomationStatus SetEnabled(bool enabled);
 }
 
 /// <summary>Screens a CM2 consult appointment against active studies via the local LLM.</summary>

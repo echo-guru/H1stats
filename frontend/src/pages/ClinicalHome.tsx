@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange, ClipboardList, Star, BarChart3 } from 'lucide-react'
+import { Stethoscope, ArrowRight, Users, Building2, TrendingUp, TrendingDown, CalendarRange, ClipboardList, Star, BarChart3, Gift } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useReportFavorites } from '../hooks/useReportFavorites'
 
@@ -31,7 +31,7 @@ const REPORTING_DR_ACTIONS: ClinicalAction[] = [
   },
   {
     title: 'James Report',
-    description: 'Site volumes by quarter — Echo, SE/DSE and consults for Greenslopes, Cleveland and Toowoomba (current + prior 2 years).',
+    description: 'Site volumes by quarter for Greenslopes, Cleveland and Toowoomba. Choose the date range and which tests to include.',
     path: '/clinical/james-report',
     icon: BarChart3,
   },
@@ -51,20 +51,32 @@ const REFERRING_DR_ACTIONS: ClinicalAction[] = [
     icon: Users,
   },
   {
+    title: 'Xmas marketing - by Dr',
+    description: 'Top referring doctors with a combined total, and the practice they refer from most often.',
+    path: '/clinical/xmas-marketing',
+    icon: Gift,
+  },
+  {
     title: 'Top Referring Practices - CM2',
     description: 'Top referring practices, then doctors by provider number, then investigation types.',
     path: '/clinical/top-referring-practices-cm2',
     icon: Building2,
   },
   {
+    title: 'Xmas marketing - by practice',
+    description: 'Top referring practices excluding Hearts 1st. Filter by test type and patients. CSV is the practice total and address.',
+    path: '/clinical/xmas-marketing-by-practice',
+    icon: Building2,
+  },
+  {
     title: 'Referrers Growth by Quarter - CM2',
-    description: 'Rank referring doctors by growth versus the previous quarter.',
+    description: 'Rank referring doctors by growth across a quarter range. Default is the last two quarters.',
     path: '/clinical/referrers-growth-cm2',
     icon: TrendingUp,
   },
   {
     title: 'Referrers Decline by Quarter - CM2',
-    description: 'Identify referring doctors whose referrals dropped versus the previous quarter.',
+    description: 'Referring doctors whose referrals dropped across a quarter range. Default is the last two quarters.',
     path: '/clinical/referrers-decline-cm2',
     icon: TrendingDown,
   },

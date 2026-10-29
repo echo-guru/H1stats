@@ -56,7 +56,9 @@ public static class ClinicalReportCatalog
         "/clinical/james-report",
         "/clinical/tee-ioe-progress",
         "/clinical/top-referring-doctors-cm2",
+        "/clinical/xmas-marketing",
         "/clinical/top-referring-practices-cm2",
+        "/clinical/xmas-marketing-by-practice",
         "/clinical/referrers-growth-cm2",
         "/clinical/referrers-decline-cm2",
         "/clinical/referrer-history-cm2",
@@ -132,7 +134,32 @@ public record TopReferringDoctorsReport(
     CountTriple GrandTotal,
     int TopN,
     string? InvestigationTypeFilter = null,
-    string? SiteFilter = null
+    string? SiteFilter = null,
+    string? WardFilter = null,
+    bool ExcludeH1Doctors = false
+);
+
+public record XmasMarketingRow(
+    int Rank,
+    string PersonId,
+    string DisplayName,
+    int Total,
+    string? PracticeName,
+    string? PracticeAddress,
+    string? AddressStreet1 = null,
+    string? AddressStreet2 = null,
+    string? AddressSuburb = null,
+    string? AddressPostcode = null
+);
+
+public record XmasMarketingReport(
+    IReadOnlyList<XmasMarketingRow> Rows,
+    int GrandTotal,
+    int TopN,
+    string? InvestigationTypeFilter = null,
+    string? SiteFilter = null,
+    string? WardFilter = null,
+    bool ExcludeH1Doctors = false
 );
 
 public record ReferringPracticeTestRow(
@@ -156,22 +183,32 @@ public record ReferringPracticeGroup(
     string PracticeName,
     string? Suburb,
     IReadOnlyList<ReferringPracticeDoctor> Doctors,
-    CountTriple Subtotal
+    CountTriple Subtotal,
+    string? AddressStreet1 = null,
+    string? AddressStreet2 = null,
+    string? AddressSuburb = null,
+    string? AddressPostcode = null
 );
 
 public record TopReferringPracticesReport(
     IReadOnlyList<ReferringPracticeGroup> Groups,
     CountTriple GrandTotal,
     int TopN,
-    string? SiteFilter = null
+    string? SiteFilter = null,
+    string? InvestigationTypeFilter = null,
+    string? WardFilter = null,
+    bool ExcludeH1Doctors = false
 );
+
+public record ReferrerQuarterColumn(string Key, string Label);
 
 public record ReferrerGrowthTestRow(
     string InvestigationType,
     int PreviousTotal,
     int CurrentTotal,
     int Growth,
-    decimal? GrowthPercent
+    decimal? GrowthPercent,
+    IReadOnlyList<int> QuarterTotals
 );
 
 public record ReferrerGrowthRow(
@@ -182,7 +219,8 @@ public record ReferrerGrowthRow(
     int CurrentTotal,
     int Growth,
     decimal? GrowthPercent,
-    IReadOnlyList<ReferrerGrowthTestRow> TestRows
+    IReadOnlyList<ReferrerGrowthTestRow> TestRows,
+    IReadOnlyList<int> QuarterTotals
 );
 
 public record ReferrersGrowthReport(
@@ -197,7 +235,8 @@ public record ReferrersGrowthReport(
     string? InvestigationTypeFilter = null,
     string SortBy = "growth",
     string Mode = "growth",
-    string? SiteFilter = null
+    string? SiteFilter = null,
+    IReadOnlyList<ReferrerQuarterColumn>? Quarters = null
 );
 
 public record ReferrerSearchHit(
@@ -269,23 +308,22 @@ public record DrSummaryReport(
     IReadOnlyList<DrSummaryRow> Rows,
     int UnassignedDccs = 0);
 
+/// <summary>One selected test column on the James Report. Counts in each row follow this order.</summary>
+public record JamesReportTestColumn(string Code, string DisplayName, string ShortName);
+
 /// <summary>One calendar quarter of site volume for the James Report.</summary>
 public record JamesReportQuarterRow(
     int Year,
     int Quarter,
     string Label,
-    int Echo,
-    int SeDse,
-    int Consults);
+    IReadOnlyList<int> Counts);
 
-/// <summary>Year block with quarter rows and year totals (current year may be partial).</summary>
+/// <summary>Year block with quarter rows and year totals. Partial when the range does not cover the whole year.</summary>
 public record JamesReportYearBlock(
     int Year,
     bool Partial,
     IReadOnlyList<JamesReportQuarterRow> Quarters,
-    int EchoTotal,
-    int SeDseTotal,
-    int ConsultsTotal);
+    IReadOnlyList<int> Totals);
 
 public record JamesReportSiteSection(
     string SiteId,
@@ -293,13 +331,13 @@ public record JamesReportSiteSection(
     IReadOnlyList<JamesReportYearBlock> Years);
 
 /// <summary>
-/// Site volume report: Echo (TTE), SE/DSE, and diary consults by campus,
-/// current calendar year (partial) plus the prior two full years, by quarter.
+/// Site volumes by calendar quarter for a chosen date range and tests
+/// (Greenslopes, Cleveland, Toowoomba).
 /// </summary>
 public record JamesReport(
     DateOnly DateFrom,
-    DateOnly DateToExclusive,
-    int CurrentYear,
+    DateOnly DateTo,
+    IReadOnlyList<JamesReportTestColumn> Tests,
     IReadOnlyList<JamesReportSiteSection> Sites);
 
 public record ReferrerHistoryReport(
@@ -365,3 +403,16 @@ public record ResearchSlackStatus(
     bool Configured,
     string Message
 );
+
+/// <summary>Weekday auto-screen + Slack schedule status. Never includes secrets.</summary>
+public record ResearchDailyAutomationStatus(
+    bool Enabled,
+    int Hour,
+    int Minute,
+    bool WeekdaysOnly,
+    string TimeZoneId,
+    string Source,
+    string Message
+);
+
+public record SetResearchDailyAutomationRequest(bool Enabled);

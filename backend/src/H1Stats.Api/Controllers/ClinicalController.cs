@@ -121,9 +121,11 @@ public class ClinicalController : ControllerBase
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
         [FromQuery] int? top,
-        [FromQuery] string? investigationType,
+        [FromQuery] string[]? investigationType,
         [FromQuery] string? site,
-        CancellationToken ct)
+        [FromQuery] string? ward,
+        [FromQuery] bool excludeH1 = false,
+        CancellationToken ct = default)
     {
         if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
             return BadRequest(new { message = error });
@@ -131,7 +133,35 @@ public class ClinicalController : ControllerBase
         try
         {
             var topN = Cm2TopN.Clamp(top);
-            var report = await _cm2.GetTopReferringDoctorsAsync(from, to, topN, investigationType, site, ct);
+            var report = await _cm2.GetTopReferringDoctorsAsync(
+                from, to, topN, investigationType, site, ward, excludeH1, ct);
+            return Ok(report);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("cm2/xmas-marketing")]
+    public async Task<IActionResult> GetXmasMarketing(
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] int? top,
+        [FromQuery] string[]? investigationType,
+        [FromQuery] string? site,
+        [FromQuery] string? ward,
+        [FromQuery] bool excludeH1 = false,
+        CancellationToken ct = default)
+    {
+        if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
+            return BadRequest(new { message = error });
+
+        try
+        {
+            var topN = Cm2TopN.Clamp(top);
+            var report = await _cm2.GetXmasMarketingReportAsync(
+                from, to, topN, investigationType, site, ward, excludeH1, ct);
             return Ok(report);
         }
         catch (Exception ex)
@@ -141,10 +171,16 @@ public class ClinicalController : ControllerBase
     }
 
     [HttpGet("cm2/investigation-types")]
-    public IActionResult GetCm2InvestigationTypes()
+    public IActionResult GetCm2InvestigationTypes(
+        [FromQuery] bool includeConsults = false,
+        [FromQuery] bool includeAll = false)
     {
-        var list = Cm2InvestigationTypeMapping.ForReferringDoctors
-            .Select(x => new { id = x.Code, displayName = x.DisplayName });
+        var source = includeAll
+            ? Cm2InvestigationTypeMapping.All
+            : includeConsults
+                ? Cm2InvestigationTypeMapping.ForReferringDoctors
+                : Cm2InvestigationTypeMapping.ForReferringTests;
+        var list = source.Select(x => new { id = x.Code, displayName = x.DisplayName });
         return Ok(list);
     }
 
@@ -170,7 +206,12 @@ public class ClinicalController : ControllerBase
         [FromQuery] string? dateTo,
         [FromQuery] int? top,
         [FromQuery] string? site,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] bool excludeHearts1st = false,
+        [FromQuery] string[]? investigationType = null,
+        [FromQuery] string? ward = null,
+        [FromQuery] bool excludeH1 = false,
+        [FromQuery] bool includeConsults = false)
     {
         if (!TryParseDateRange(dateFrom, dateTo, out var from, out var to, out var error))
             return BadRequest(new { message = error });
@@ -178,7 +219,9 @@ public class ClinicalController : ControllerBase
         try
         {
             var topN = Cm2TopN.Clamp(top);
-            var report = await _cm2.GetTopReferringPracticesAsync(from, to, topN, site, ct);
+            var report = await _cm2.GetTopReferringPracticesAsync(
+                from, to, topN, site, excludeHearts1st, ct,
+                investigationType, ward, excludeH1, includeConsults);
             return Ok(report);
         }
         catch (Exception ex)
@@ -196,6 +239,7 @@ public class ClinicalController : ControllerBase
         [FromQuery] string? sortBy,
         [FromQuery] string? mode,
         [FromQuery] string? site,
+        [FromQuery] int? quarters,
         CancellationToken ct)
     {
         if (!QuarterPeriod.TryParse(year, quarter, out var current, out var error))
@@ -204,8 +248,9 @@ public class ClinicalController : ControllerBase
         try
         {
             var topN = Cm2TopN.Clamp(top);
+            var span = Math.Clamp(quarters ?? 2, 2, 12);
             var report = await _cm2.GetReferrersGrowthByQuarterAsync(
-                current.Year, current.Quarter, topN, investigationType, sortBy, mode, site, ct);
+                current.Year, current.Quarter, topN, investigationType, sortBy, mode, site, span, ct);
             return Ok(report);
         }
         catch (Exception ex)
@@ -429,12 +474,39 @@ public class ClinicalController : ControllerBase
     }
 
     [HttpGet("cm2/james-report")]
-    public async Task<IActionResult> GetJamesReport(CancellationToken ct)
+    public async Task<IActionResult> GetJamesReport(
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] string[]? investigationType,
+        CancellationToken ct)
     {
+        DateOnly from;
+        DateOnly to;
+        if (string.IsNullOrWhiteSpace(dateFrom) && string.IsNullOrWhiteSpace(dateTo))
+        {
+            to = DateOnly.FromDateTime(DateTime.Today);
+            from = new DateOnly(to.Year - 2, 1, 1);
+        }
+        else if (!TryParseDateRange(dateFrom, dateTo, out from, out to, out var rangeError))
+        {
+            return BadRequest(new { message = rangeError });
+        }
+
+        var requested = investigationType is null || investigationType.All(string.IsNullOrWhiteSpace)
+            ? Cm2InvestigationTypeMapping.JamesDefaultCodes
+            : investigationType;
+        var codes = Cm2InvestigationTypeMapping.ResolveJamesReportCodes(requested);
+        if (codes.Count == 0)
+            return BadRequest(new { message = "Select at least one known test." });
+
         try
         {
-            var report = await _cm2.GetJamesReportAsync(ct);
+            var report = await _cm2.GetJamesReportAsync(from, to, codes, ct);
             return Ok(report);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {

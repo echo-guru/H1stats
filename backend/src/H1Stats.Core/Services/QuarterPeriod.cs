@@ -31,6 +31,27 @@ public static class QuarterPeriod
         return Of(year, quarter);
     }
 
+    /// <summary>
+    /// <paramref name="count"/> calendar quarters ending at <paramref name="year"/>/<paramref name="quarter"/>, oldest first.
+    /// Count is clamped to 2–12.
+    /// </summary>
+    public static IReadOnlyList<(int Year, int Quarter, DateOnly From, DateOnly ToExclusive, string Label)> EndingAt(
+        int year, int quarter, int count)
+    {
+        count = Math.Clamp(count, 2, 12);
+        var cursor = Of(year, quarter);
+        var list = new List<(int Year, int Quarter, DateOnly From, DateOnly ToExclusive, string Label)>(count);
+        for (var i = 0; i < count; i++)
+        {
+            list.Add(cursor);
+            if (i < count - 1)
+                cursor = Previous(cursor.Year, cursor.Quarter);
+        }
+
+        list.Reverse();
+        return list;
+    }
+
     public static (int Year, int Quarter, DateOnly From, DateOnly ToExclusive, string Label) Previous(
         int year, int quarter)
     {

@@ -193,7 +193,9 @@ public static class ResearchCm2DocumentReader
         sb.AppendLine("Do not invent facts. If a criterion is not addressed, mark UNCLEAR");
         sb.AppendLine("and use reason \"Unable to determine from available records\".");
         sb.AppendLine("If height and weight are present, calculate BMI and use it for BMI criteria.");
-        sb.AppendLine("Current GLP-1/GIP/amylin therapy (including Mounjaro) counts as recent therapy.");
+        sb.AppendLine("Current/prior GLP-1/GIP/amylin use counts only when a named agent is documented as taken");
+        sb.AppendLine($"(e.g. {ResearchClinicalFactsExtractor.AgentSearchPhrases}).");
+        sb.AppendLine("Discussion or recommendation to start does not count as having taken the therapy.");
         sb.AppendLine();
         if (facts is not null)
             sb.Append(ResearchClinicalFactsExtractor.FormatBlock(facts));

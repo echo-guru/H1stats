@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, Download, Search, Users } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Search, UserMinus, Users } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
 interface ReferringDoctorStatRow {
@@ -25,6 +25,8 @@ interface ReportResult {
   topN: number
   investigationTypeFilter?: string | null
   siteFilter?: string | null
+  wardFilter?: string | null
+  excludeH1Doctors?: boolean
 }
 
 interface InvestigationTypeOption {
@@ -52,17 +54,19 @@ export default function TopReferringDoctorsCm2() {
   })
   const [dateTo, setDateTo] = useState(() => toLocalDateInputValue())
   const [topN, setTopN] = useState(50)
-  const [investigationType, setInvestigationType] = useState('')
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
   const [investigationTypes, setInvestigationTypes] = useState<InvestigationTypeOption[]>([])
   const [site, setSite] = useState('')
   const [sites, setSites] = useState<SiteOption[]>([])
+  const [ward, setWard] = useState('both')
+  const [excludeH1, setExcludeH1] = useState(false)
   const [report, setReport] = useState<ReportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    fetch('/api/clinical/cm2/investigation-types')
+    fetch('/api/clinical/cm2/investigation-types?includeConsults=true')
       .then((r) => (r.ok ? r.json() : []))
       .then((list) => {
         if (!Array.isArray(list)) {
@@ -117,8 +121,10 @@ export default function TopReferringDoctorsCm2() {
         dateTo: to,
         top: String(Math.min(500, Math.max(1, Math.floor(n)))),
       })
-      if (investigationType) params.set('investigationType', investigationType)
+      for (const typeId of selectedTypes) params.append('investigationType', typeId)
       if (site) params.set('site', site)
+      if (ward && ward !== 'both') params.set('ward', ward)
+      if (excludeH1) params.set('excludeH1', 'true')
       const res = await fetch(`/api/clinical/cm2/top-referring-doctors?${params}`)
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -165,19 +171,41 @@ export default function TopReferringDoctorsCm2() {
     const siteSlug = report.siteFilter
       ? `-${report.siteFilter.replace(/\s+/g, '-').toLowerCase()}`
       : ''
-    a.download = `top-referring-doctors-cm2-${dateFrom}-${dateTo}-top${report.topN}${typeSlug}${siteSlug}.csv`
+    const wardSlug = report.wardFilter && !report.wardFilter.includes('and')
+      ? `-${report.wardFilter.replace(/\s+/g, '-').toLowerCase()}`
+      : ''
+    const h1Slug = report.excludeH1Doctors ? '-exclude-h1' : ''
+    a.download = `top-referring-doctors-cm2-${dateFrom}-${dateTo}-top${report.topN}${typeSlug}${siteSlug}${wardSlug}${h1Slug}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
 
+  const toggleType = (id: string) => {
+    setSelectedTypes((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
+  }
+
   const selectedTypeLabel =
     report?.investigationTypeFilter ||
-    investigationTypes.find((t) => t.id === investigationType)?.displayName ||
-    'all tests'
+    (selectedTypes.length === 0
+      ? 'all tests and consults'
+      : investigationTypes
+          .filter((t) => selectedTypes.includes(t.id))
+          .map((t) => t.displayName)
+          .join(', '))
   const selectedSiteLabel =
     report?.siteFilter ||
     sites.find((s) => s.id === site)?.displayName ||
     'all sites'
+  const selectedWardLabel =
+    report?.wardFilter ||
+    (ward === 'outpatient'
+      ? 'outpatients only'
+      : ward === 'inpatient'
+        ? 'inpatients only'
+        : 'inpatients and outpatients')
+  const h1Label = (report?.excludeH1Doctors ?? excludeH1) ? 'H1 doctors excluded' : 'including H1 doctors'
 
   return (
     <div className="space-y-6">
@@ -225,16 +253,15 @@ export default function TopReferringDoctorsCm2() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-brand-primary mb-1">Investigation Type</label>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Patients</label>
             <select
-              value={investigationType}
-              onChange={(e) => setInvestigationType(e.target.value)}
+              value={ward}
+              onChange={(e) => setWard(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary bg-white"
             >
-              <option value="">All tests</option>
-              {investigationTypes.map((t) => (
-                <option key={t.id} value={t.id}>{t.displayName}</option>
-              ))}
+              <option value="both">Inpatients and outpatients</option>
+              <option value="outpatient">Outpatients only</option>
+              <option value="inpatient">Inpatients only</option>
             </select>
           </div>
           <div>
@@ -261,6 +288,62 @@ export default function TopReferringDoctorsCm2() {
             )}
           </div>
         </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant={excludeH1 ? 'brand' : 'outline'}
+            onClick={() => setExcludeH1((v) => !v)}
+            aria-pressed={excludeH1}
+            className="gap-2"
+          >
+            <UserMinus className="h-4 w-4" />
+            Exclude H1 Drs
+          </Button>
+          <p className="text-xs text-gray-500">
+            {excludeH1
+              ? 'Hearts 1st cardiologists will be omitted from the ranking.'
+              : 'Include Hearts 1st cardiologists in the ranking.'}
+          </p>
+        </div>
+
+        <fieldset className="mt-4">
+          <legend className="text-sm font-medium text-brand-primary mb-2">Investigation types</legend>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <p className="text-xs text-gray-500">
+              Leave empty for all tests and consults, or tick several (for example Holter, BP, and Initial Consultation). Consults are arrived Scheduled Consults diary bookings, split into Initial and Follow-up; site uses the appointment room.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="text-xs text-brand-primary hover:underline"
+                onClick={() => setSelectedTypes(investigationTypes.map((t) => t.id))}
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                className="text-xs text-brand-primary hover:underline"
+                onClick={() => setSelectedTypes([])}
+              >
+                All types
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-4 gap-y-1.5">
+            {investigationTypes.map((t) => (
+              <label key={t.id} className="flex items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  checked={selectedTypes.includes(t.id)}
+                  onChange={() => toggleType(t.id)}
+                  className="rounded border-gray-300 text-brand-primary focus:ring-brand-primary"
+                />
+                {t.displayName}
+              </label>
+            ))}
+          </div>
+        </fieldset>
         {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
       </div>
 
@@ -268,7 +351,7 @@ export default function TopReferringDoctorsCm2() {
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
             Showing top {report.topN} referring doctors for {selectedTypeLabel} at {selectedSiteLabel}
-            ({report.groups.length} returned). Click a doctor to expand investigation types.
+            {' '}({selectedWardLabel}, {h1Label}; {report.groups.length} returned). Click a doctor to expand investigation types.
           </p>
           {report.groups.map((g) => {
             const isOpen = Boolean(expanded[g.personId])

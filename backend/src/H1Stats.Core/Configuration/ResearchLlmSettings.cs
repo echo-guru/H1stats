@@ -21,7 +21,7 @@ public class ResearchLlmSettings
     public string ApiKey { get; set; } = "";
 
     /// <summary>HTTP timeout for inference requests.</summary>
-    public int TimeoutSeconds { get; set; } = 600;
+    public int TimeoutSeconds { get; set; } = 900;
 
     /// <summary>Configured context window (tokens). Used for future screening prompts.</summary>
     public int ContextSize { get; set; } = 8192;

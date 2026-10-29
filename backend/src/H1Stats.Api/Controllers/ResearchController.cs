@@ -1,6 +1,8 @@
+using H1Stats.Core.Configuration;
 using H1Stats.Core.Interfaces;
 using H1Stats.Core.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace H1Stats.Api.Controllers;
 
@@ -14,7 +16,9 @@ public class ResearchController : ControllerBase
     private readonly IResearchScreeningResultStore _screeningResults;
     private readonly IResearchScreeningJobService _screeningJobs;
     private readonly IResearchSlackClient _slack;
+    private readonly IResearchDailyAutomationStore _dailyAutomation;
     private readonly ICm2Repository _cm2;
+    private readonly ResearchLlmSettings _llmSettings;
 
     public ResearchController(
         IResearchLlmClient llm,
@@ -23,7 +27,9 @@ public class ResearchController : ControllerBase
         IResearchScreeningResultStore screeningResults,
         IResearchScreeningJobService screeningJobs,
         IResearchSlackClient slack,
-        ICm2Repository cm2)
+        IResearchDailyAutomationStore dailyAutomation,
+        ICm2Repository cm2,
+        IOptions<ResearchLlmSettings> llmSettings)
     {
         _llm = llm;
         _studies = studies;
@@ -31,7 +37,9 @@ public class ResearchController : ControllerBase
         _screeningResults = screeningResults;
         _screeningJobs = screeningJobs;
         _slack = slack;
+        _dailyAutomation = dailyAutomation;
         _cm2 = cm2;
+        _llmSettings = llmSettings.Value;
     }
 
     [HttpGet("llm/status")]
@@ -40,6 +48,17 @@ public class ResearchController : ControllerBase
 
     [HttpGet("slack/status")]
     public IActionResult GetSlackStatus() => Ok(_slack.GetStatus());
+
+    [HttpGet("daily-automation/status")]
+    public IActionResult GetDailyAutomationStatus() => Ok(_dailyAutomation.GetStatus());
+
+    [HttpPut("daily-automation")]
+    public IActionResult SetDailyAutomation([FromBody] SetResearchDailyAutomationRequest? request)
+    {
+        if (request is null)
+            return BadRequest(new { message = "Body { enabled: true|false } is required." });
+        return Ok(_dailyAutomation.SetEnabled(request.Enabled));
+    }
 
     [HttpPost("slack/candidate-report")]
     public async Task<IActionResult> PostCandidateReport(
@@ -120,18 +139,31 @@ public class ResearchController : ControllerBase
         [FromBody] ScreenAppointmentRequest? request,
         CancellationToken ct)
     {
+        // Do not bind llama.cpp to HttpContext.RequestAborted. Vite/browser may drop the
+        // HTTP wait while the local LLM is still generating; finishing server-side still
+        // saves the result. Use a server timeout only (slightly above ResearchLlm timeout).
+        var timeoutSeconds = Math.Clamp(_llmSettings.TimeoutSeconds, 1, 3600) + 120;
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token);
+        // Ignore request-abort for the LLM work; still honour process shutdown via timeout only.
+        _ = ct;
+
         try
         {
-            var result = await _screening.ScreenAppointmentAsync(appointmentId, request, ct);
+            var result = await _screening.ScreenAppointmentAsync(appointmentId, request, linked.Token);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            return StatusCode(504, new { message = "Screening timed out waiting for the local LLM." });
+            return StatusCode(504, new
+            {
+                message =
+                    $"Screening timed out waiting for the local LLM (limit {timeoutSeconds}s).",
+            });
         }
         catch (Exception ex)
         {

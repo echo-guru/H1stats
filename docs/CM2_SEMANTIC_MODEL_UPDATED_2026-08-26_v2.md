@@ -383,9 +383,9 @@ Unknown (null, 0, outside 1–41) is included in Total but not in Outpatient or 
 
 ---
 
-## Site (`TEST.SITE` → `SCHEDULE_SITE`)
+## Site (`SCHEDULE_SITE` vs `TEST.SITE`)
 
-Campus for a **completed study** is stored on `TEST.SITE`, which is `SCHEDULE_SITE.SCHEDULE_SITE_RID`.
+Diary campus (rooms, notes, consult bookings) is `SCHEDULE_SITE.SCHEDULE_SITE_RID`:
 
 | `SCHEDULE_SITE_RID` | Site name | Common aliases |
 |---------------------|-----------|----------------|
@@ -394,9 +394,17 @@ Campus for a **completed study** is stored on `TEST.SITE`, which is `SCHEDULE_SI
 | 3 | Toowoomba | TWBA |
 | NULL | Unassigned (older studies) | — |
 
-```
-TEST.SITE = SCHEDULE_SITE.SCHEDULE_SITE_RID
-```
+Completed studies store campus on `TEST.SITE`. Greenslopes matches (`1` = `1`). **Cleveland and Toowoomba are reversed** on `TEST.SITE` relative to `SCHEDULE_SITE`:
+
+| Campus | `SCHEDULE_SITE_RID` (diary / UI) | `TEST.SITE` (completed studies) |
+|--------|----------------------------------|----------------------------------|
+| Greenslopes | 1 | 1 |
+| Cleveland | 2 | 3 |
+| Toowoomba | 3 | 2 |
+
+Confirmed against same-day diary rooms and Toowoomba hospital wards on `TEST.WARD` (St Raphael's, St Damien's, St Luke's, … sit on `TEST.SITE = 2`). Do **not** join `TEST.SITE = SCHEDULE_SITE_RID` to name Cleveland / Toowoomba.
+
+When a referring-doctor report is filtered to one site, translate the UI/`SCHEDULE_SITE` code to `TEST.SITE` (2 ↔ 3) before filtering. Unassigned (`NULL`) studies appear only when Site = All.
 
 Do **not** infer campus from `SCHEDULE_GROUP` or `SCHEDULE_OCC_SERVICE`. Those are the booking diary:
 
@@ -407,8 +415,6 @@ SCHEDULE_NOTE.SCHEDULE_SITE_RID        → SCHEDULE_SITE    (diary notes at a ca
 ```
 
 `SCHEDULE_GROUP` is a service grouping (Echo / TEE / DCCS, Stress, Monitoring Attach, …), not Greenslopes / Cleveland / Toowoomba.
-
-When a referring-doctor report is filtered to one site, rank and counts include only studies with that `TEST.SITE`. Unassigned (`NULL`) studies appear only when Site = All.
 
 ---
 
@@ -455,7 +461,7 @@ Important: the Other number remains stored in `PAT_CONTACT_NUM` whether or not i
 3. Count with `COUNT(DISTINCT TEST.TEST_RID)`.
 4. Keep referring-doctor and reporting-cardiologist dimensions separate.
 5. Do not merge ambiguous doctors without review.
-6. Use `TEST.SITE` (not `SCHEDULE_GROUP` / `SCHEDULE_OCC_SERVICE`) for campus on completed studies.
+6. Use `TEST.SITE` for campus on completed studies, but map Cleveland/Toowoomba as `TEST.SITE` 3/2 (not `SCHEDULE_SITE_RID` 2/3). Use room → `SCHEDULE_SITE` for diary campus.
 7. Add newly confirmed relationships here before using them in production reports.
 
 ## Unresolved (do not invent)

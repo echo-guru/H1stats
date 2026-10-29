@@ -73,6 +73,12 @@ public static class ResearchClinicalFactsExtractor
         ("symlin", "Symlin (pramlintide)"),
     ];
 
+    /// <summary>
+    /// Brand/generic names recognised for GLP-1 / GIP / amylin therapy screening.
+    /// </summary>
+    public static string AgentSearchPhrases =>
+        "Ozempic | semaglutide | Wegovy | Rybelsus | Trulicity | dulaglutide | Victoza | Saxenda | liraglutide | Mounjaro | tirzepatide | Zepbound | Byetta | Bydureon | exenatide | pramlintide | Symlin";
+
     private readonly record struct FactHit(double Value, string Source, DateOnly? Date);
 
     public static ResearchDerivedFacts Extract(IReadOnlyList<(ResearchSourceDocument Doc, string Text)> parts)
@@ -197,10 +203,12 @@ public static class ResearchClinicalFactsExtractor
         if (facts.HasGlp1Therapy)
         {
             sb.AppendLine(
-                $"- GLP-1/GIP/amylin therapy mentioned: {string.Join(", ", facts.Glp1Agents)}"
+                $"- GLP-1/GIP/amylin therapy in use (named agent): {string.Join(", ", facts.Glp1Agents)}"
                 + SourceSuffix(facts.Glp1Source));
             sb.AppendLine(
-                "  Current documented use counts as recent GLP-1/GIP/amylin therapy within the past year.");
+                "  Count only current or prior documented use of a named agent. Discussion, counselling,");
+            sb.AppendLine(
+                "  or a recommendation to start therapy does NOT count as having taken the therapy.");
         }
         sb.AppendLine("===== DERIVED FACTS END =====");
         sb.AppendLine();
@@ -312,17 +320,60 @@ public static class ResearchClinicalFactsExtractor
 
     private static bool MentionsAgent(string text, string pattern)
     {
-        var match = Regex.Match(text, $@"\b{Regex.Escape(pattern)}\b", RegexOptions.IgnoreCase);
-        if (!match.Success)
+        foreach (Match match in Regex.Matches(text, $@"\b{Regex.Escape(pattern)}\b", RegexOptions.IgnoreCase))
+        {
+            if (IsActualTherapyMention(text, match))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the agent name appears as documented use, not only as a discussion or recommendation.
+    /// </summary>
+    public static bool IsActualTherapyMention(string text, Match match)
+    {
+        var start = Math.Max(0, match.Index - 120);
+        var end = Math.Min(text.Length, match.Index + match.Length + 80);
+        var window = text[start..end];
+
+        // Explicit non-use / cessation nearby
+        if (Regex.IsMatch(
+                window,
+                @"\b(not on|never (been )?on|no longer|ceased|stopped|discontinued|denied|no evidence of|has not (been )?(started|commenced|taken)|not (been )?prescribed)\b",
+                RegexOptions.IgnoreCase))
             return false;
 
-        var start = Math.Max(0, match.Index - 48);
-        var window = text[start..match.Index];
-        return !Regex.IsMatch(
-            window,
-            @"\b(not on|no longer|ceased|stopped|discontinued|denied|no evidence of)\b",
-            RegexOptions.IgnoreCase);
+        // Discussion / recommendation to start — do not treat as having taken the therapy
+        if (Regex.IsMatch(
+                window,
+                @"\b(recommend(?:ed|ing|ation)?|consider(?:ed|ing|ation)?|discuss(?:ed|ing|ion)?|suggest(?:ed|ing|ion)?|propos(?:e|ed|ing)|plan(?:s|ned|ning)?\s+to|will\s+(?:be\s+)?(?:start|commence|trial|initiate)|(?:to|should|could|may|might)\s+(?:start|commence|initiate|trial|begin)|start(?:ing)?\s+(?:her|him|them|the\s+patient)\s+on|candidate\s+for|may\s+benefit|offer(?:ed|ing)?|think(?:ing)?\s+about|talk(?:ed|ing)?\s+about|option\s+of|possible\s+(?:role\s+for|use\s+of)|counsell?(?:ed|ing)?|advised?\s+to\s+start|keen\s+to\s+start|interested\s+in)\b",
+                RegexOptions.IgnoreCase))
+            return false;
+
+        return true;
     }
+
+    /// <summary>True when reason text names a recognised GLP-1/GIP/amylin agent.</summary>
+    public static bool ReasonNamesGlp1Agent(string? reason) =>
+        !string.IsNullOrWhiteSpace(reason)
+        && Regex.IsMatch(
+            reason,
+            @"\b(mounjaro|zepbound|tirzepatide|ozempic|wegovy|rybelsus|semaglutide|saxenda|victoza|liraglutide|trulicity|dulaglutide|byetta|bydureon|exenatide|retatrutide|cagrilintide|pramlintide|symlin)\b",
+            RegexOptions.IgnoreCase);
+
+    /// <summary>True when reason describes discussion/recommendation rather than documented use.</summary>
+    public static bool ReasonIsDiscussionOnly(string? reason) =>
+        !string.IsNullOrWhiteSpace(reason)
+        && Regex.IsMatch(
+            reason,
+            @"\b(recommend(?:ed|ing|ation)?|consider(?:ed|ing)?|discuss(?:ed|ing|ion)?|suggest(?:ed|ing)?|propos(?:e|ed)|plan(?:s|ned|ning)? to|will (?:be )?(?:start|commence|trial)|(?:to|should) start|candidate for|may benefit|counsell?(?:ed|ing)?|advised to start|interested in|option of)\b",
+            RegexOptions.IgnoreCase)
+        && !Regex.IsMatch(
+            reason,
+            @"\b(currently (?:on|taking)|taking|prescribed|continues on|remains on|commenced on|started on|has been on|was (?:on|taking)|recent(?:ly)? (?:used|taken|started)|history of (?:use|therapy))\b",
+            RegexOptions.IgnoreCase);
 
     private static bool TryRange(string raw, double min, double max, out double value)
     {

@@ -2,12 +2,18 @@ import { useEffect, useState, Fragment } from 'react'
 import { ChevronDown, ChevronRight, Download, Search, TrendingUp } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
+interface QuarterColumn {
+  key: string
+  label: string
+}
+
 interface GrowthTestRow {
   investigationType: string
   previousTotal: number
   currentTotal: number
   growth: number
   growthPercent: number | null
+  quarterTotals?: number[]
 }
 
 interface GrowthRow {
@@ -19,6 +25,7 @@ interface GrowthRow {
   growth: number
   growthPercent: number | null
   testRows: GrowthTestRow[]
+  quarterTotals?: number[]
 }
 
 interface ReportResult {
@@ -33,6 +40,7 @@ interface ReportResult {
   investigationTypeFilter?: string | null
   sortBy?: string
   siteFilter?: string | null
+  quarters?: QuarterColumn[]
 }
 
 interface InvestigationTypeOption {
@@ -75,10 +83,33 @@ function growthClass(n: number): string {
   return 'text-gray-600'
 }
 
+const RANGE_OPTIONS = [
+  { value: 2, label: '2 quarters' },
+  { value: 4, label: '4 quarters' },
+  { value: 6, label: '6 quarters' },
+  { value: 8, label: '8 quarters (2 years)' },
+  { value: 12, label: '12 quarters (3 years)' },
+]
+
+function reportQuarters(report: ReportResult): QuarterColumn[] {
+  if (report.quarters && report.quarters.length > 0) return report.quarters
+  return [
+    { key: 'previous', label: report.previousQuarterLabel },
+    { key: 'current', label: report.currentQuarterLabel },
+  ]
+}
+
+function countsFor(totals: number[] | undefined, previous: number, current: number, length: number): number[] {
+  if (totals && totals.length === length) return totals
+  if (length === 2) return [previous, current]
+  return Array.from({ length }, (_, index) => totals?.[index] ?? 0)
+}
+
 export default function ReferrersGrowthCm2() {
   const defaults = lastCompletedQuarter()
   const [year, setYear] = useState(defaults.year)
   const [quarter, setQuarter] = useState(defaults.quarter)
+  const [quarterSpan, setQuarterSpan] = useState(2)
   const [topN, setTopN] = useState(50)
   const [sortBy, setSortBy] = useState<'growth' | 'percent'>('growth')
   const [investigationType, setInvestigationType] = useState('')
@@ -141,6 +172,7 @@ export default function ReferrersGrowthCm2() {
       const params = new URLSearchParams({
         year: String(year),
         quarter: String(quarter),
+        quarters: String(quarterSpan),
         top: String(Math.min(500, Math.max(1, Math.floor(n)))),
         sortBy,
         mode: 'growth',
@@ -169,28 +201,51 @@ export default function ReferrersGrowthCm2() {
 
   const exportCsv = () => {
     if (!report) return
+    const quarters = reportQuarters(report)
     const lines = [
-      `Rank,Referring Doctor,Investigation Type,${report.previousQuarterLabel},${report.currentQuarterLabel},Growth,Growth %`,
+      `Rank,Referring Doctor,Investigation Type,${quarters.map((q) => q.label).join(',')},Growth,Growth %`,
     ]
-    for (const r of report.rows) {
+    const pushRow = (
+      rank: number,
+      name: string,
+      type: string,
+      totals: number[],
+      growth: number,
+      growthPercent: number | null,
+      previousTotal: number,
+      currentTotal: number,
+    ) => {
       const pct =
-        r.previousTotal === 0 && r.currentTotal > 0
+        previousTotal === 0 && currentTotal > 0
           ? 'New'
-          : r.growthPercent === null || r.growthPercent === undefined
+          : growthPercent === null || growthPercent === undefined
             ? ''
-            : String(r.growthPercent)
+            : String(growthPercent)
       lines.push(
-        `${r.rank},"${r.displayName}","(All)",${r.previousTotal},${r.currentTotal},${r.growth},${pct}`
+        `${rank},"${name}","${type}",${totals.join(',')},${growth},${pct}`
+      )
+    }
+    for (const r of report.rows) {
+      pushRow(
+        r.rank,
+        r.displayName,
+        '(All)',
+        countsFor(r.quarterTotals, r.previousTotal, r.currentTotal, quarters.length),
+        r.growth,
+        r.growthPercent,
+        r.previousTotal,
+        r.currentTotal,
       )
       for (const t of r.testRows ?? []) {
-        const tpct =
-          t.previousTotal === 0 && t.currentTotal > 0
-            ? 'New'
-            : t.growthPercent === null || t.growthPercent === undefined
-              ? ''
-              : String(t.growthPercent)
-        lines.push(
-          `${r.rank},"${r.displayName}","${t.investigationType}",${t.previousTotal},${t.currentTotal},${t.growth},${tpct}`
+        pushRow(
+          r.rank,
+          r.displayName,
+          t.investigationType,
+          countsFor(t.quarterTotals, t.previousTotal, t.currentTotal, quarters.length),
+          t.growth,
+          t.growthPercent,
+          t.previousTotal,
+          t.currentTotal,
         )
       }
     }
@@ -215,7 +270,7 @@ export default function ReferrersGrowthCm2() {
         <div>
           <h2 className="text-2xl font-semibold text-brand-accent">Referrers Growth by Quarter - CM2</h2>
           <p className="text-sm text-gray-600">
-            Compare referring doctors in the selected quarter against the previous quarter, ranked by growth
+            Compare referring doctors across a quarter range, ending at the selected quarter, ranked by growth
           </p>
         </div>
       </div>
@@ -235,7 +290,19 @@ export default function ReferrersGrowthCm2() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-brand-primary mb-1">Quarter</label>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Range</label>
+            <select
+              value={quarterSpan}
+              onChange={(e) => setQuarterSpan(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary bg-white"
+            >
+              {RANGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-brand-primary mb-1">Ending quarter</label>
             <select
               value={quarter}
               onChange={(e) => setQuarter(Number(e.target.value))}
@@ -311,17 +378,22 @@ export default function ReferrersGrowthCm2() {
         {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
       </div>
 
-      {report && (
+      {report && (() => {
+        const quarters = reportQuarters(report)
+        const columnCount = 5 + quarters.length
+        return (
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
             Ranking referrers active in <strong>{report.currentQuarterLabel}</strong>
-            {' '}({report.currentFrom} – {report.currentTo}) vs{' '}
+            {' '}({report.currentFrom} – {report.currentTo}) across{' '}
+            <strong>{quarters.length} quarters</strong> from{' '}
             <strong>{report.previousQuarterLabel}</strong>
             {' '}({report.previousFrom} – {report.previousTo})
             {report.investigationTypeFilter ? ` · ${report.investigationTypeFilter}` : ''}
             {report.siteFilter ? ` · ${report.siteFilter}` : ' · all sites'}
-            . Sorted by {report.sortBy === 'percent' ? 'growth %' : 'absolute growth'}
-            {' '}(current − previous). Click a doctor to expand investigation types.
+            . Growth is {report.currentQuarterLabel} minus {report.previousQuarterLabel}.
+            Sorted by {report.sortBy === 'percent' ? 'growth %' : 'absolute growth'}.
+            Click a doctor to expand investigation types.
           </p>
 
           <div className="bg-card rounded-lg border border-brand-primary-border overflow-hidden">
@@ -332,8 +404,11 @@ export default function ReferrersGrowthCm2() {
                     <th className="text-left p-3 font-medium w-10" />
                     <th className="text-left p-3 font-medium w-16">Rank</th>
                     <th className="text-left p-3 font-medium">Referring Doctor</th>
-                    <th className="text-right p-3 font-medium">{report.previousQuarterLabel}</th>
-                    <th className="text-right p-3 font-medium">{report.currentQuarterLabel}</th>
+                    {quarters.map((q, index) => (
+                      <th key={q.key} className={`text-right p-3 font-medium whitespace-nowrap ${index === quarters.length - 1 ? 'font-semibold' : ''}`}>
+                        {q.label}
+                      </th>
+                    ))}
                     <th className="text-right p-3 font-medium">Growth</th>
                     <th className="text-right p-3 font-medium">Growth %</th>
                   </tr>
@@ -342,6 +417,7 @@ export default function ReferrersGrowthCm2() {
                   {report.rows.map((r) => {
                     const isOpen = Boolean(expanded[r.personId])
                     const Chevron = isOpen ? ChevronDown : ChevronRight
+                    const totals = countsFor(r.quarterTotals, r.previousTotal, r.currentTotal, quarters.length)
                     return (
                       <Fragment key={r.personId}>
                         <tr
@@ -352,9 +428,15 @@ export default function ReferrersGrowthCm2() {
                             <Chevron className="h-4 w-4" />
                           </td>
                           <td className="p-3 font-mono text-brand-primary">#{r.rank}</td>
-                          <td className="p-3 font-medium text-brand-accent">{r.displayName}</td>
-                          <td className="p-3 text-right font-mono">{r.previousTotal.toLocaleString()}</td>
-                          <td className="p-3 text-right font-mono font-semibold">{r.currentTotal.toLocaleString()}</td>
+                          <td className="p-3 font-medium text-brand-accent whitespace-nowrap">{r.displayName}</td>
+                          {totals.map((total, index) => (
+                            <td
+                              key={`${r.personId}-${quarters[index]?.key ?? index}`}
+                              className={`p-3 text-right font-mono ${index === totals.length - 1 ? 'font-semibold' : ''}`}
+                            >
+                              {total.toLocaleString()}
+                            </td>
+                          ))}
                           <td className={`p-3 text-right font-mono font-bold ${growthClass(r.growth)}`}>
                             {formatGrowth(r.growth)}
                           </td>
@@ -364,26 +446,32 @@ export default function ReferrersGrowthCm2() {
                         </tr>
                         {isOpen && (r.testRows?.length ?? 0) > 0 && (
                           <tr className="bg-muted/20">
-                            <td colSpan={7} className="p-0">
+                            <td colSpan={columnCount} className="p-0">
                               <table className="w-full text-sm">
                                 <thead className="bg-muted/50">
                                   <tr>
                                     <th className="text-left p-3 pl-12 font-medium text-brand-primary">Investigation Type</th>
-                                    <th className="text-right p-3 font-medium text-brand-primary">{report.previousQuarterLabel}</th>
-                                    <th className="text-right p-3 font-medium text-brand-primary">{report.currentQuarterLabel}</th>
+                                    {quarters.map((q) => (
+                                      <th key={q.key} className="text-right p-3 font-medium text-brand-primary whitespace-nowrap">{q.label}</th>
+                                    ))}
                                     <th className="text-right p-3 font-medium text-brand-primary">Growth</th>
                                     <th className="text-right p-3 font-medium text-brand-primary">Growth %</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {r.testRows.map((t) => (
+                                  {r.testRows.map((t) => {
+                                    const testTotals = countsFor(t.quarterTotals, t.previousTotal, t.currentTotal, quarters.length)
+                                    return (
                                     <tr
                                       key={`${r.personId}-${t.investigationType}`}
                                       className="border-b border-brand-primary-border/40"
                                     >
-                                      <td className="p-3 pl-12">{t.investigationType}</td>
-                                      <td className="p-3 text-right font-mono">{t.previousTotal.toLocaleString()}</td>
-                                      <td className="p-3 text-right font-mono">{t.currentTotal.toLocaleString()}</td>
+                                      <td className="p-3 pl-12 whitespace-nowrap">{t.investigationType}</td>
+                                      {testTotals.map((total, index) => (
+                                        <td key={`${t.investigationType}-${index}`} className="p-3 text-right font-mono">
+                                          {total.toLocaleString()}
+                                        </td>
+                                      ))}
                                       <td className={`p-3 text-right font-mono font-semibold ${growthClass(t.growth)}`}>
                                         {formatGrowth(t.growth)}
                                       </td>
@@ -391,7 +479,8 @@ export default function ReferrersGrowthCm2() {
                                         {formatGrowthPct(t.growthPercent, t.previousTotal, t.currentTotal)}
                                       </td>
                                     </tr>
-                                  ))}
+                                    )
+                                  })}
                                 </tbody>
                               </table>
                             </td>
@@ -402,8 +491,8 @@ export default function ReferrersGrowthCm2() {
                   })}
                   {report.rows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="p-6 text-center text-gray-500">
-                        No referring doctors found for this quarter.
+                      <td colSpan={columnCount} className="p-6 text-center text-gray-500">
+                        No referring doctors found for this range.
                       </td>
                     </tr>
                   )}
@@ -412,7 +501,8 @@ export default function ReferrersGrowthCm2() {
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

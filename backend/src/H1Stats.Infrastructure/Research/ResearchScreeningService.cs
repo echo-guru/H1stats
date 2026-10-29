@@ -493,12 +493,20 @@ public sealed class ResearchScreeningService : IResearchScreeningService
           just because the letters do not print the word BMI.
 
         GLP-1 / GIP / amylin therapy:
-        - Current documented use of Mounjaro/tirzepatide, Ozempic/Wegovy/semaglutide,
-          Saxenda/Victoza/liraglutide, Trulicity/dulaglutide, or similar agents is recent
-          therapy. For an exclusion of recent GLP-1/GIP/amylin therapy within one year,
-          current use is MET (the exclusion is present).
-        - Do not mark that exclusion NOT_MET because the notes describe current therapy
-          rather than a previous completed course.
+        - Search phrases for named agents: Ozempic | semaglutide | Wegovy | Rybelsus | Trulicity |
+          dulaglutide | Victoza | Saxenda | liraglutide | Mounjaro | tirzepatide | Zepbound |
+          Byetta | Bydureon | exenatide | pramlintide | Symlin (and equivalents).
+        - MET for recent/current therapy requires a named agent with documented use
+          (currently taking, prescribed, commenced on, history of use within the window).
+        - Name the exact agent in the reason (e.g. "Ozempic (semaglutide) currently prescribed").
+        - Do NOT mark MET when the notes only discuss, counsel, consider, or recommend starting
+          therapy, or when an agent is mentioned as a future option. That is NOT_MET for an
+          exclusion of recent therapy (the patient has not taken it).
+        - Do not mark MET from a generic phrase like "GLP-1 therapy documented" without naming
+          the agent. Prefer UNCLEAR if use is unclear and no named agent is found.
+        - Current documented use of a named agent counts as recent therapy within one year for
+          that exclusion (status MET). Do not mark NOT_MET merely because therapy is ongoing
+          rather than a finished prior course.
 
         Inclusion criteria polarity:
         - MET = the documents show the patient satisfies the inclusion requirement.
@@ -541,7 +549,10 @@ public sealed class ResearchScreeningService : IResearchScreeningService
             For UNCLEAR use reason "Unable to determine from available records".
             If height and weight are in the documents, calculate BMI and apply BMI criteria.
             If an inclusion age range is stated and the age is outside it, that criterion is NOT_MET.
-            Current Mounjaro/tirzepatide or other GLP-1/GIP/amylin agonists count as recent therapy.
+            For GLP-1/GIP/amylin exclusions: MET only with a named agent (Ozempic, semaglutide, Wegovy,
+            Trulicity, dulaglutide, Victoza, Saxenda, liraglutide, Mounjaro, tirzepatide, pramlintide,
+            Symlin, etc.) documented as taken/current — not merely discussed or recommended to start.
+            Name the agent in the reason. Discussion-only mentions are NOT_MET for that exclusion.
             For exclusions: a value below the stated threshold is NOT_MET (exclusion does not apply).
             Use LIKELY_NOT_SUITABLE if any inclusion is NOT_MET or any exclusion is MET.
             Use LIKELY_SUITABLE if Age, BMI, diabetes and HbA1c are all determined and favourable
@@ -703,38 +714,57 @@ public sealed class ResearchScreeningService : IResearchScreeningService
             return next;
         }
 
-        if (facts.HasGlp1Therapy && IsGlp1TherapyCriterion(assessment.Criterion))
+        if (IsGlp1TherapyCriterion(assessment.Criterion))
         {
-            var agents = string.Join(", ", facts.Glp1Agents);
-            var absenceRequired = RequiresTherapyAbsence(assessment.Criterion);
-            string status;
-            string reason;
-            if (isExclusion)
+            // Discussion / recommendation only — not documented use (no extractor hit for actual use)
+            if (!facts.HasGlp1Therapy
+                && assessment.Status == CriterionStatus.Met
+                && (ResearchClinicalFactsExtractor.ReasonIsDiscussionOnly(assessment.Reason)
+                    || !ResearchClinicalFactsExtractor.ReasonNamesGlp1Agent(assessment.Reason)))
             {
-                // Exclusion of recent GLP-1/GIP/amylin: current documented use = exclusion present.
-                status = absenceRequired ? CriterionStatus.NotMet : CriterionStatus.Met;
-                reason = absenceRequired
-                    ? $"{agents} documented, so an absence-of-therapy exclusion does not apply."
-                    : $"{agents} documented. Current use counts as recent GLP-1/GIP/amylin therapy within the past year.";
-            }
-            else
-            {
-                status = absenceRequired ? CriterionStatus.NotMet : CriterionStatus.Met;
-                reason = absenceRequired
-                    ? $"{agents} documented, so the patient is not GLP-1/GIP/amylin naive."
-                    : $"{agents} documented.";
+                var status = ResearchClinicalFactsExtractor.ReasonIsDiscussionOnly(assessment.Reason)
+                    ? CriterionStatus.NotMet
+                    : CriterionStatus.Unclear;
+                var reason = status == CriterionStatus.NotMet
+                    ? "Agent discussed or recommended only; not documented as taken."
+                    : "Unable to determine from available records — no named GLP-1/GIP/amylin agent identified as taken.";
+                changed++;
+                return assessment with { Status = status, Reason = reason };
             }
 
-            var next = assessment with
+            if (facts.HasGlp1Therapy)
             {
-                Status = status,
-                Reason = reason,
-                EvidenceFileName = facts.Glp1Source ?? assessment.EvidenceFileName,
-            };
-            if (next.Status != assessment.Status
-                || !string.Equals(next.Reason, assessment.Reason, StringComparison.Ordinal))
-                changed++;
-            return next;
+                var agents = string.Join(", ", facts.Glp1Agents);
+                var absenceRequired = RequiresTherapyAbsence(assessment.Criterion);
+                string status;
+                string reason;
+                if (isExclusion)
+                {
+                    // Exclusion of recent GLP-1/GIP/amylin: current documented use = exclusion present.
+                    status = absenceRequired ? CriterionStatus.NotMet : CriterionStatus.Met;
+                    reason = absenceRequired
+                        ? $"{agents} documented as in use, so an absence-of-therapy exclusion does not apply."
+                        : $"{agents} documented as in use. Current use counts as recent GLP-1/GIP/amylin therapy within the past year.";
+                }
+                else
+                {
+                    status = absenceRequired ? CriterionStatus.NotMet : CriterionStatus.Met;
+                    reason = absenceRequired
+                        ? $"{agents} documented as in use, so the patient is not GLP-1/GIP/amylin naive."
+                        : $"{agents} documented as in use.";
+                }
+
+                var next = assessment with
+                {
+                    Status = status,
+                    Reason = reason,
+                    EvidenceFileName = facts.Glp1Source ?? assessment.EvidenceFileName,
+                };
+                if (next.Status != assessment.Status
+                    || !string.Equals(next.Reason, assessment.Reason, StringComparison.Ordinal))
+                    changed++;
+                return next;
+            }
         }
 
         return assessment;
@@ -837,11 +867,11 @@ public sealed class ResearchScreeningService : IResearchScreeningService
         var text = reason.Trim();
 
         // Named current GLP-1/GIP agents mean recent therapy is documented. Do not let
-        // "no mention of prior therapy" flip that to NOT_MET.
-        var namesCurrentGlp1 = Regex.IsMatch(
-            text,
-            @"\b(mounjaro|zepbound|tirzepatide|ozempic|wegovy|rybelsus|semaglutide|saxenda|victoza|liraglutide|trulicity|dulaglutide|byetta|bydureon|exenatide|retatrutide|cagrilintide|pramlintide|symlin)\b",
-            RegexOptions.IgnoreCase);
+        // "no mention of prior therapy" flip that to NOT_MET — unless the reason is only a
+        // discussion/recommendation to start.
+        var namesCurrentGlp1 = ResearchClinicalFactsExtractor.ReasonNamesGlp1Agent(text);
+        if (namesCurrentGlp1 && ResearchClinicalFactsExtractor.ReasonIsDiscussionOnly(text))
+            return CriterionStatus.NotMet;
 
         // Strong "does not apply / below threshold / absent" signals → NOT_MET
         if (Regex.IsMatch(text,

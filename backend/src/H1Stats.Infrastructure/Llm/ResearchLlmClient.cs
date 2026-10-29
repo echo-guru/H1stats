@@ -25,7 +25,7 @@ public sealed class ResearchLlmClient : IResearchLlmClient
     {
         _http = http;
         _settings = options.Value;
-        var timeout = Math.Clamp(_settings.TimeoutSeconds, 1, 3600);
+        var timeout = Math.Clamp(_settings.TimeoutSeconds, 1, 3600) + 30;
         _http.Timeout = TimeSpan.FromSeconds(timeout);
     }
 
@@ -92,6 +92,8 @@ public sealed class ResearchLlmClient : IResearchLlmClient
         if (!_settings.HasApiKey)
             return new ResearchLlmChatResult(false, null, "LLM API key is not configured on the H1Stats server.", null);
 
+        var timeoutSeconds = Math.Clamp(_settings.TimeoutSeconds, 1, 3600);
+
         try
         {
             var model = string.IsNullOrWhiteSpace(modelId) ? await ResolveModelIdAsync(ct) : modelId.Trim();
@@ -101,8 +103,12 @@ public sealed class ResearchLlmClient : IResearchLlmClient
             var body = CreateChatCompletionBody(model, messages);
             using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
             using var request = CreateAuthenticatedRequest(HttpMethod.Post, "/v1/chat/completions", content);
-            using var response = await _http.SendAsync(request, ct);
-            var payload = await response.Content.ReadAsStringAsync(ct);
+
+            // Explicit timeout so HttpClient / proxy aborts map to a clear message.
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            using var response = await _http.SendAsync(request, timeoutCts.Token);
+            var payload = await response.Content.ReadAsStringAsync(timeoutCts.Token);
 
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
                 response.StatusCode == System.Net.HttpStatusCode.Forbidden)
@@ -119,12 +125,20 @@ public sealed class ResearchLlmClient : IResearchLlmClient
 
             return new ResearchLlmChatResult(true, text, null, model);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return new ResearchLlmChatResult(
                 false,
                 null,
-                $"LLM did not respond in time (timed out after {_settings.TimeoutSeconds} seconds). This is the llama.cpp completion, not a CM2 file fetch.",
+                "LLM request was cancelled (browser disconnected, proxy closed the wait, or batch cancel).",
+                modelId);
+        }
+        catch (OperationCanceledException)
+        {
+            return new ResearchLlmChatResult(
+                false,
+                null,
+                $"LLM did not respond in time (timed out after {timeoutSeconds} seconds). This is the llama.cpp completion, not a CM2 file fetch.",
                 modelId);
         }
         catch (HttpRequestException ex)

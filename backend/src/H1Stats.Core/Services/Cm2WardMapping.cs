@@ -52,6 +52,35 @@ public static class Cm2WardMapping
     /// <summary>Outpatient ward code in TEST.WARD.</summary>
     public const string OutpatientCode = "1";
 
+    public const string WardFilterBoth = "both";
+    public const string WardFilterOutpatient = "outpatient";
+    public const string WardFilterInpatient = "inpatient";
+
+    public static string NormalizeReportFilter(string? raw)
+    {
+        var key = raw?.Trim().ToLowerInvariant();
+        return key switch
+        {
+            "outpatient" or "op" or "outpatients" => WardFilterOutpatient,
+            "inpatient" or "ip" or "inpatients" => WardFilterInpatient,
+            _ => WardFilterBoth,
+        };
+    }
+
+    public static string ResolveReportFilterLabel(string? raw) => NormalizeReportFilter(raw) switch
+    {
+        WardFilterOutpatient => "outpatients only",
+        WardFilterInpatient => "inpatients only",
+        _ => "inpatients and outpatients",
+    };
+
+    public static string ReportFilterSql(string? raw) => NormalizeReportFilter(raw) switch
+    {
+        WardFilterOutpatient => "AND t.WARD = 1",
+        WardFilterInpatient => "AND t.WARD BETWEEN 2 AND 41",
+        _ => string.Empty,
+    };
+
     public static string ResolveDisplayName(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))

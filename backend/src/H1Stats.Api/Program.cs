@@ -22,6 +22,11 @@ builder.Services.Configure<ResearchSlackSettings>(options =>
     builder.Configuration.GetSection(ResearchSlackSettings.SectionName).Bind(options);
     ResearchSlackSettings.ApplyEnvironmentOverrides(options);
 });
+builder.Services.Configure<ResearchDailySlackSettings>(options =>
+{
+    builder.Configuration.GetSection(ResearchDailySlackSettings.SectionName).Bind(options);
+    ResearchDailySlackSettings.ApplyEnvironmentOverrides(options);
+});
 
 // Module registry — add future modules here
 builder.Services.AddSingleton<ModuleRegistry>(_ => new ModuleRegistry([
@@ -38,6 +43,7 @@ builder.Services.AddSingleton<IAuthService>(_ => new AuthService(usersFilePath))
 builder.Services.AddSingleton<IResearchStudyStore>(_ => new ResearchStudyStore(studiesFilePath));
 builder.Services.AddSingleton<IResearchScreeningResultStore>(_ =>
     new ResearchScreeningResultStore(screeningResultsFilePath));
+builder.Services.AddSingleton<IResearchDailyAutomationStore, ResearchDailyAutomationStore>();
 builder.Services.AddScoped<ICm2Repository, Cm2Repository>();
 builder.Services.AddSingleton<ICm2DevDatabase, Cm2DevDatabase>();
 builder.Services.AddSingleton<IResearchScreeningJobService, ResearchScreeningJobService>();
@@ -56,10 +62,13 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddHttpClient<IResearchLlmClient, ResearchLlmClient>((sp, client) =>
 {
     var settings = sp.GetRequiredService<IOptions<ResearchLlmSettings>>().Value;
-    var timeout = Math.Clamp(settings.TimeoutSeconds, 1, 3600);
+    // Rely on per-request CancelAfter in ResearchLlmClient for clear timeout errors.
+    // Keep HttpClient.Timeout as a hard ceiling slightly above the configured limit.
+    var timeout = Math.Clamp(settings.TimeoutSeconds, 1, 3600) + 30;
     client.Timeout = TimeSpan.FromSeconds(timeout);
 });
 builder.Services.AddHttpClient<IResearchSlackClient, ResearchSlackClient>();
+builder.Services.AddHostedService<ResearchDailySlackHostedService>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

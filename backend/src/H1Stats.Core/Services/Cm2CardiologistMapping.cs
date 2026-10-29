@@ -30,6 +30,17 @@ public static class Cm2CardiologistMapping
     public static readonly IReadOnlyList<string> SummaryColumnIds =
         ["282", "2901", "1681", "1941", "144", "981"];
 
+    /// <summary>
+    /// CM2_DOCTOR_RID values for Hearts 1st cardiologists when they appear as referring doctors.
+    /// Distinct from USER_LIST / TEST.CARDIOLOGIST1 ids.
+    /// Ch'ng, Pascoe, Ura, Wright, Manins, Morze, Goo. Hilling-Smith is no longer H1.
+    /// </summary>
+    public static readonly IReadOnlyList<int> ReferringDoctorExcludeCm2Rids =
+        [521, 2491, 3329, 3524, 7288, 28301, 63941];
+
+    public static string ReferringDoctorExcludeSql() =>
+        $"AND (d.CM2_DOCTOR_RID IS NULL OR d.CM2_DOCTOR_RID NOT IN ({string.Join(", ", ReferringDoctorExcludeCm2Rids)}))";
+
     private static readonly Dictionary<string, string> IdByDisplayName =
         ById.ToDictionary(kvp => kvp.Value.DisplayName, kvp => kvp.Key, StringComparer.OrdinalIgnoreCase);
 

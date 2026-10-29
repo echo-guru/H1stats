@@ -241,13 +241,14 @@ public static class ResearchOverall
             }
         }
 
-        if (!changed)
+        var status = ResearchWorklistStatusMapper.FromStudies(studies);
+        if (!changed && status == result.Status)
             return result;
 
         return result with
         {
             Studies = studies,
-            Status = ResearchWorklistStatusMapper.FromStudies(studies),
+            Status = status,
         };
     }
 
@@ -545,18 +546,18 @@ public static class ResearchWorklistStatusMapper
         if (studies is null || studies.Count == 0)
             return ResearchWorklistStatus.NotAssessed;
 
-        if (studies.Any(s => s.Overall == ResearchSuitability.LikelyNotSuitable))
-            return ResearchWorklistStatus.NotSuitable;
+        if (studies.Any(s =>
+                s.Overall is ResearchSuitability.LikelySuitable
+                    or ResearchSuitability.PossiblySuitable))
+            return ResearchWorklistStatus.Suitable;
 
         if (studies.Any(s =>
                 s.Overall == ResearchSuitability.NeedsReview
                 || !string.IsNullOrWhiteSpace(s.Error)))
             return ResearchWorklistStatus.Unclear;
 
-        if (studies.Any(s =>
-                s.Overall is ResearchSuitability.LikelySuitable
-                    or ResearchSuitability.PossiblySuitable))
-            return ResearchWorklistStatus.Suitable;
+        if (studies.Any(s => s.Overall == ResearchSuitability.LikelyNotSuitable))
+            return ResearchWorklistStatus.NotSuitable;
 
         return ResearchWorklistStatus.Unclear;
     }

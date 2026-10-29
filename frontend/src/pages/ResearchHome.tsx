@@ -283,12 +283,6 @@ function slackDoctorHeading(name?: string | null): string {
   return /^dr\b/i.test(raw) ? raw : `Dr ${raw}`
 }
 
-function slackAppointmentDate(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
-  if (!m) return iso
-  return `${Number(m[3])} ${SLACK_MONTHS[Number(m[2]) - 1]} ${m[1]}`
-}
-
 function slackAppointmentTime(time?: string | null): string | null {
   if (!time) return null
   const m = /^(\d{1,2}):(\d{2})/.exec(time.trim())
@@ -314,16 +308,48 @@ function slackStudyClassification(
   return null
 }
 
+/** Brief doctor-facing hints for Unclear rows. Skips motivation / weight-loss attempt / MRI. */
+function slackUnclearHint(study: StudyScreening): string | null {
+  const hints: string[] = []
+  const seen = new Set<string>()
+  const add = (hint: string) => {
+    if (seen.has(hint)) return
+    seen.add(hint)
+    hints.push(hint)
+  }
+
+  for (const row of study.inclusion.concat(study.exclusion)) {
+    if (row.status !== 'UNCLEAR') continue
+    const c = row.criterion.toLowerCase()
+    if (/\bmotivat|\bweight-?\s*loss attempt|\bdietary weight|\bmri\b/.test(c)) continue
+    if (/\bhba1c\b/.test(c)) add('Check HbA1c')
+    else if (/\bdiabetes\b/.test(c)) add('Check diabetes')
+    else if (/\bbmi\b|body mass index/.test(c)) add('Check BMI')
+    else if (/\bage\b/.test(c)) add('Check age')
+    else if (/\bknee\b/.test(c) && /\boa\b|\bosteoarthritis\b/.test(c)) add('Check knee OA')
+    else if (/\bglp|gip|amylin|tirzepatide|semaglutide|liraglutide|dulaglutide/.test(c))
+      add('Check GLP-1')
+  }
+
+  return hints.length > 0 ? hints.join(', ') : null
+}
+
+function slackClassificationLabel(study: StudyScreening): string | null {
+  const classification = slackStudyClassification(study)
+  if (!classification) return null
+  if (classification !== 'Unclear') return classification
+  const hint = slackUnclearHint(study)
+  return hint ? `Unclear — ${hint}` : 'Unclear'
+}
+
 function buildCandidateSlack(consults: UpcomingConsult[], searchDateIso: string): string {
   const linesByDoctor = new Map<string, string[]>()
   const doctorOrder: string[] = []
 
   for (const row of consults) {
-    if (row.status !== 'SUITABLE' && row.status !== 'UNCLEAR') continue
-
     const positive = (row.studies ?? [])
       .map((study) => {
-        const classification = slackStudyClassification(study)
+        const classification = slackClassificationLabel(study)
         return classification ? { studyName: study.studyName, classification } : null
       })
       .filter(
@@ -331,7 +357,7 @@ function buildCandidateSlack(consults: UpcomingConsult[], searchDateIso: string)
           item,
         ): item is {
           studyName: string
-          classification: 'Suitable' | 'Likely Suitable' | 'Unclear'
+          classification: string
         } => item !== null,
       )
     if (positive.length === 0) continue
@@ -344,12 +370,11 @@ function buildCandidateSlack(consults: UpcomingConsult[], searchDateIso: string)
       doctorOrder.push(heading)
     }
 
-    const when = [slackAppointmentDate(row.appointmentDate), slackAppointmentTime(row.appointmentTime)]
-      .filter(Boolean)
-      .join(', ')
+    const when = slackAppointmentTime(row.appointmentTime)
     const name = slackPatientName(row.patientName)
     for (const item of positive) {
-      lines.push(`- ${name} — ${when} — ${item.studyName} — **${item.classification}**`)
+      const parts = [name, when, item.studyName, `**${item.classification}**`].filter(Boolean)
+      lines.push(`- ${parts.join(' — ')}`)
     }
   }
 
@@ -391,6 +416,13 @@ export default function ResearchHome() {
   const [copyResultsLabel, setCopyResultsLabel] = useState<'idle' | 'copied'>('idle')
   const [slackConfigured, setSlackConfigured] = useState(false)
   const [slackSendLabel, setSlackSendLabel] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [dailyAutomation, setDailyAutomation] = useState<{
+    enabled: boolean
+    hour: number
+    minute: number
+    message: string
+  } | null>(null)
+  const [dailyAutomationBusy, setDailyAutomationBusy] = useState(false)
   const appliedBatchItems = useRef<Set<string>>(new Set())
   const copyResultsTimer = useRef<number>(0)
   const slackSendTimer = useRef<number>(0)
@@ -407,9 +439,10 @@ export default function ResearchHome() {
     setLoading(true)
     setError('')
     try {
-      const [llmRes, slackRes] = await Promise.all([
+      const [llmRes, slackRes, dailyRes] = await Promise.all([
         fetch('/api/research/llm/status'),
         fetch('/api/research/slack/status'),
+        fetch('/api/research/daily-automation/status'),
       ])
       if (!llmRes.ok) throw new Error('Failed to check LLM status')
       const data = (await llmRes.json()) as LlmStatus
@@ -420,14 +453,55 @@ export default function ResearchHome() {
       } else {
         setSlackConfigured(false)
       }
+      if (dailyRes.ok) {
+        const daily = (await dailyRes.json()) as {
+          enabled?: boolean
+          hour?: number
+          minute?: number
+          message?: string
+        }
+        setDailyAutomation({
+          enabled: Boolean(daily.enabled),
+          hour: typeof daily.hour === 'number' ? daily.hour : 6,
+          minute: typeof daily.minute === 'number' ? daily.minute : 0,
+          message: daily.message || '',
+        })
+      } else {
+        setDailyAutomation(null)
+      }
     } catch {
       setStatus(null)
       setSlackConfigured(false)
+      setDailyAutomation(null)
       setError('Cannot reach the H1Stats API.')
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const setDailyAutomationEnabled = async (enabled: boolean) => {
+    setDailyAutomationBusy(true)
+    setError('')
+    try {
+      const res = await fetch('/api/research/daily-automation', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.message || 'Could not update daily automation')
+      setDailyAutomation({
+        enabled: Boolean(data.enabled),
+        hour: typeof data.hour === 'number' ? data.hour : 6,
+        minute: typeof data.minute === 'number' ? data.minute : 0,
+        message: data.message || '',
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update daily automation')
+    } finally {
+      setDailyAutomationBusy(false)
+    }
+  }
 
   const loadStudies = useCallback(async () => {
     setStudiesError('')
@@ -701,6 +775,49 @@ export default function ResearchHome() {
           </>
         ) : null}
       </div>
+
+      {dailyAutomation && (
+        <div className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-6 space-y-3 max-w-lg">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-brand-primary">Weekday auto-screen &amp; Slack</h3>
+            <Button
+              variant={dailyAutomation.enabled ? 'outline' : 'brand'}
+              size="sm"
+              disabled={dailyAutomationBusy}
+              onClick={() => void setDailyAutomationEnabled(!dailyAutomation.enabled)}
+            >
+              {dailyAutomationBusy
+                ? 'Saving…'
+                : dailyAutomation.enabled
+                  ? 'Turn off'
+                  : 'Turn on'}
+            </Button>
+          </div>
+          <div
+            className={`flex items-center gap-2 text-sm ${
+              dailyAutomation.enabled ? 'text-emerald-700' : 'text-gray-600'
+            }`}
+          >
+            {dailyAutomation.enabled ? (
+              <CheckCircle className="h-4 w-4 shrink-0" />
+            ) : (
+              <XCircle className="h-4 w-4 shrink-0" />
+            )}
+            <span className="font-medium">
+              {dailyAutomation.enabled
+                ? `On — ${String(dailyAutomation.hour).padStart(2, '0')}:${String(dailyAutomation.minute).padStart(2, '0')} Brisbane weekdays`
+                : 'Off'}
+            </span>
+          </div>
+          {dailyAutomation.message && (
+            <p className="text-sm text-gray-600">{dailyAutomation.message}</p>
+          )}
+          <p className="text-xs text-gray-500">
+            Turn off when a trial is closed (e.g. AMAZE-1). Manual Screen all, Copy Results, and Send to
+            Slack still work.
+          </p>
+        </div>
+      )}
 
       <section className="bg-white rounded-lg border border-brand-primary-border shadow-sm p-6 space-y-4 max-w-5xl">
         <div className="flex items-start gap-3">

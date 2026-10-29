@@ -6,9 +6,22 @@ export interface VersionEntry {
 }
 
 /** Current product version shown in Settings and System Health. */
-export const APP_VERSION = '1.9.0'
+export const APP_VERSION = '1.10.0'
 
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: '1.10.0',
+    date: '29 Oct 2026',
+    title: 'Christmas marketing reports and referrer filters',
+    changes: [
+      'Xmas marketing - by Dr: combined referral total and the practice referred from most often. CSV splits the address into street 1, street 2, suburb, and postcode.',
+      'Xmas marketing - by practice: Hearts 1st practices are excluded. Filter by test type (including consults) and inpatients or outpatients. CSV is the practice total and address.',
+      'Top Referring Doctors: filter by investigation type (including consults), inpatients or outpatients, and exclude Hearts 1st doctors.',
+      'Referrers Growth and Decline: choose a quarter range (2 to 12 quarters) instead of only the last two.',
+      'James Report: choose the date range and which tests to include, with updated charts and PDF export.',
+      'Research: weekday auto-screen of today’s consults with a Slack post. GLP-1 exclusions count only a named agent the patient has taken, not a discussion or recommendation to start.',
+    ],
+  },
   {
     version: '1.9.0',
     date: '7 Sep 2026',

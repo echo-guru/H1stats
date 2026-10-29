@@ -163,18 +163,20 @@ Click a cardiologist to open the same OOS rows for that doctor across the prior 
 ### Filters
 
 - Date From / Date To
-- Site (default: **All sites**; filters `TEST.SITE` → `SCHEDULE_SITE`: Greenslopes, Cleveland, Toowoomba)
-- Investigation Type (default: **All tests**; filters `TEST.TEST_REQUIRED`)
+- Site (default: **All sites**; filters completed studies via `TEST.SITE`, with Cleveland/Toowoomba reversed vs `SCHEDULE_SITE`: Greenslopes, Cleveland, Toowoomba)
+- Investigation types (default: **all tests and consults**; multi-select of `TEST.TEST_REQUIRED` plus Initial Consultation and Follow-up Consultation; Resting ECG excluded)
+- Patients (default: **Inpatients and outpatients**; optional outpatients-only `WARD = 1` or inpatients-only `WARD` 2–41). Consult bookings are treated as outpatient.
+- Exclude H1 Drs (optional; omits Hearts 1st cardiologists by `CM2_DOCTOR_RID`)
 - Top N (editable; default **50**; server clamp 1–500)
 
 ### Database Mapping
 
 | Field | Source |
 |-------|--------|
-| Study Date | `HEARTS1ST.TEST.TEST_DATE` |
-| Investigation Type | `TEST.TEST_REQUIRED` → semantic lookup |
-| Referring Doctor (person) | `TEST.REFERRING_DOCTOR` → `DOCTOR.DOCTOR_RID` → `CM2_DOCTOR` (fallback: unresolved legacy `DOCTOR_RID`) |
-| Site | `TEST.SITE` → `SCHEDULE_SITE.SCHEDULE_SITE_RID` (1 Greenslopes, 2 Cleveland, 3 Toowoomba). NULL = unassigned (included only when Site = All). |
+| Study Date | Tests: `TEST.TEST_DATE`. Consults: `SCHEDULE_APPOINTMENT.APPOINTMENT_DATE`. |
+| Investigation Type | `TEST.TEST_REQUIRED` → semantic lookup; consults = arrived `SCHEDULE_APPOINTMENT` in `SCHEDULE_OCC_SERVICE.SCHEDULE_GROUP_RID = 5`. Initial vs follow-up from `OCC_SERVICE_TITLE` (`INITIAL` → Initial Consultation; otherwise Follow-up Consultation). |
+| Referring Doctor (person) | Tests: `TEST.REFERRING_DOCTOR` → `DOCTOR` → `CM2_DOCTOR`. Consults: `PATIENT.PAT_REFERRING_DOCTOR` → `DOCTOR` → `CM2_DOCTOR`. |
+| Site | UI campus is `SCHEDULE_SITE` (1 Greenslopes, 2 Cleveland, 3 Toowoomba). Completed studies filter `TEST.SITE` with Cleveland/Toowoomba reversed (`TEST.SITE` 3 / 2). NULL = unassigned (included only when Site = All). Consults filter `SCHEDULE_SITE` via appointment room (no Cleveland/Toowoomba swap). |
 | Ward | `TEST.WARD` — `1` = Outpatient; `2`–`41` = Inpatient; else Unknown |
 
 ### Reporting Grain
@@ -194,7 +196,7 @@ CSV.
 ### Filters
 
 - Date From / Date To
-- Site (default: **All sites**; filters `TEST.SITE` → `SCHEDULE_SITE`)
+- Site (default: **All sites**; filters `TEST.SITE` with Cleveland/Toowoomba reversed vs `SCHEDULE_SITE`)
 - Top N (editable; default **50**; server clamp 1–500)
 
 ### Hierarchy
@@ -214,7 +216,7 @@ CSV.
 ### Filters
 
 - Year / Quarter (default: last completed calendar quarter)
-- Site (default: All sites; filters `TEST.SITE` → `SCHEDULE_SITE`)
+- Site (default: All sites; filters `TEST.SITE` with Cleveland/Toowoomba reversed vs `SCHEDULE_SITE`)
 - Investigation Type (default: All tests; Resting ECG excluded)
 - Top N (editable; default **50**)
 
